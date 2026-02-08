@@ -4,6 +4,64 @@ plugins {
     id "org.jetbrains.kotlin.android"
 }
 
+// PRoot 바이너리 다운로드 태스크
+def prootAssetsDir = file("src/main/assets/proot")
+def prootTarball = file("${buildDir}/proot/proot-android-aarch64.tar.gz")
+def prootDownloadUrl = "https://raw.githubusercontent.com/green-green-avk/build-proot-android/master/packages/proot-android-aarch64.tar.gz"
+
+tasks.register("downloadProot") {
+    description = "Downloads PRoot ARM64 binary for Android"
+    outputs.dir(prootAssetsDir)
+
+    doLast {
+        if (file("${prootAssetsDir}/proot").exists()) {
+            logger.lifecycle("PRoot binary already exists in assets, skipping download")
+            return
+        }
+
+        prootTarball.parentFile.mkdirs()
+        prootAssetsDir.mkdirs()
+
+        logger.lifecycle("Downloading PRoot binary from ${prootDownloadUrl}...")
+        new URL(prootDownloadUrl).withInputStream { input ->
+            prootTarball.withOutputStream { output ->
+                output << input
+            }
+        }
+
+        logger.lifecycle("Extracting PRoot binary...")
+        exec {
+            if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                commandLine "cmd", "/c", "tar", "xzf", prootTarball.absolutePath, "-C", prootAssetsDir.absolutePath
+            } else {
+                commandLine "tar", "xzf", prootTarball.absolutePath, "-C", prootAssetsDir.absolutePath
+            }
+        }
+
+        // proot 바이너리는 tar 내 root/bin/proot 경로에 있을 수 있음
+        def extractedProot = fileTree(prootAssetsDir).matching { include "**/proot" }.files.find()
+        if (extractedProot != null && extractedProot.parentFile != prootAssetsDir) {
+            copy {
+                from extractedProot
+                into prootAssetsDir
+            }
+            // 중간 디렉토리 정리
+            prootAssetsDir.listFiles()?.each { f ->
+                if (f.isDirectory()) f.deleteDir()
+            }
+        }
+
+        if (!file("${prootAssetsDir}/proot").exists()) {
+            throw new RuntimeException("PRoot binary not found after extraction")
+        }
+        logger.lifecycle("PRoot binary ready at ${prootAssetsDir}/proot")
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("downloadProot")
+}
+
 android {
     namespace "kr.co.palank.pocketserver"
     compileSdk 34
@@ -51,7 +109,7 @@ dependencies {
     implementation "androidx.core:core-ktx:1.12.0"
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.6.2"
     implementation "com.google.android.material:material:1.11.0"
-    
+
     // Jetpack Compose 핵심
     implementation "androidx.activity:activity-compose:1.8.2"
     implementation platform("androidx.compose:compose-bom:2023.10.01")
@@ -59,11 +117,15 @@ dependencies {
     implementation "androidx.compose.ui:ui-graphics"
     implementation "androidx.compose.ui:ui-tooling-preview"
     implementation "androidx.compose.material3:material3"
-    
+
     // 모니터링 및 상태 관리
     implementation "androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2"
     implementation "androidx.datastore:datastore-preferences:1.0.0"
-    
+
+    // rootfs tar.xz 압축 해제
+    implementation "org.apache.commons:commons-compress:1.26.0"
+    implementation "org.tukaani:xz:1.9"
+
     testImplementation "junit:junit:4.13.2"
     androidTestImplementation "androidx.test.ext:junit:1.1.5"
     androidTestImplementation "androidx.test.espresso:espresso-core:3.5.1"

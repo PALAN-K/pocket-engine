@@ -25,6 +25,9 @@ gradle-app.setting
 # Kotlin
 *.class
 
+# PRoot binary (downloaded by Gradle task at build time)
+/app/src/main/assets/proot/
+
 # Local
 *.log
 *.tmp
