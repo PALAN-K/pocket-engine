@@ -1,8 +1,8 @@
 # Android
 *.iml
 .gradle/
-local.properties
-.idea/
+/local.properties
+/.idea/
 .DS_Store
 /build/
 /captures
@@ -14,8 +14,8 @@ local.properties
 *.dex
 
 # App build outputs
-**/app/build/
-**/app/release/
+/app/build/
+/app/release/
 
 # Gradle
 gradle-app.setting
@@ -26,16 +26,8 @@ gradle-app.setting
 *.class
 
 # PRoot binary (downloaded by Gradle task at build time)
-**/app/src/main/assets/proot/
+/app/src/main/assets/proot/
 
 # Local
 *.log
 *.tmp
-nul
-
-# Claude Code local settings (not shared)
-.claude/settings.local.json
-
-# OS
-Thumbs.db
-Desktop.ini
