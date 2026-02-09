@@ -46,6 +46,15 @@ keystore.properties
 firebase-debug.log
 .firebase/
 
+# Cloudflare
+.wrangler/
+
+# Node
+node_modules/
+
+# Test artifacts
+test-screenshots/
+
 # OS
 Thumbs.db
 Desktop.ini
