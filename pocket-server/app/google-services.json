@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "750131989575",
+    "project_id": "pocket-server-palank",
+    "storage_bucket": "pocket-server-palank.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:750131989575:android:3a9f5d0b4d826b16e23562",
+        "android_client_info": {
+          "package_name": "kr.co.palank.pocketmonitor"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcYKax4RK71br6eHts6CwBpdqS9_1yLOY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:750131989575:android:1defb8144f50fb0ee23562",
+        "android_client_info": {
+          "package_name": "kr.co.palank.pocketserver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcYKax4RK71br6eHts6CwBpdqS9_1yLOY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

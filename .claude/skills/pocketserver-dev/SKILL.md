@@ -16,6 +16,9 @@ description: Development guide for PocketServer — a 2-app system (PocketMonito
 - **Revenue**: Free + AdMob in Monitor only (banner + interstitial on open/exit)
 - **IAP**: None. All features free. User acquisition is #1 priority.
 - **Tech stack**: Kotlin, Jetpack Compose, PRoot, Dropbear, AdMob, LocalSocket IPC
+- **Firebase**: Project `pocket-server-palank` (Crashlytics + Hosting)
+- **Signing**: `keystore/pocketserver-release.jks` — both apps use same key (gitignored)
+- **GitHub**: https://github.com/naegeon/pocket-server.git
 
 ## Why 2 Apps?
 
@@ -121,6 +124,7 @@ kr.co.palank.pocketserver/
 | Battery/temperature, swap | [android-battery.md](references/android-battery.md) |
 | Manufacturer deep links | [manufacturer-deeplinks.md](references/manufacturer-deeplinks.md) |
 | WiFi IP, SSH, tunneling | [networking.md](references/networking.md) |
+| Signing keystore, app signing | [signing-keystore.md](references/signing-keystore.md) |
 
 ## IPC Protocol v1.0 (LocalSocket)
 
@@ -215,6 +219,49 @@ Engine → Monitor:
 10. **No IAP**: All features free. User acquisition first.
 11. **Never download Engine from Monitor**: Always open browser to Firebase Hosting.
 12. **Design**: Apple-style minimalism, Material 3, blue accent, green/yellow/red status.
+
+## Signing Keystore (Shared Between Both Apps)
+
+Both apps (PocketMonitor and PocketServer Engine) MUST be signed with the SAME keystore. This is required for LocalSocket IPC package signature verification -- if the signatures don't match, the Engine will reject connections from the Monitor.
+
+### File Locations
+
+| File | Path | Committed to Git |
+|------|------|-----------------|
+| Keystore (JKS) | `keystore/pocketserver-release.jks` | NO (gitignored) |
+| Properties | `keystore/keystore.properties` | NO (gitignored) |
+
+### keystore.properties Format
+
+```properties
+storePassword=<password>
+keyPassword=<password>
+keyAlias=pocketserver
+storeFile=../keystore/pocketserver-release.jks
+```
+
+### Usage in build.gradle
+
+Both `pocket-server/app/build.gradle` and `pocket-monitor/app/build.gradle` load the same `keystore.properties` via:
+```groovy
+def keystorePropertiesFile = rootProject.file("../keystore/keystore.properties")
+```
+The signing config is safely wrapped in an `if (keystorePropertiesFile.exists())` check so builds succeed even without the keystore (e.g., CI debug builds).
+
+### IMPORTANT: Backup
+
+The keystore file is gitignored and NEVER committed. If lost, you cannot update either app on users' devices (signature mismatch). Back up the keystore externally:
+- Google Drive
+- USB drive
+- Password manager (1Password, Bitwarden)
+- Multiple locations recommended
+
+### Keystore Details
+
+- Algorithm: RSA 2048-bit
+- Validity: 10,000 days (~27 years)
+- Alias: `pocketserver`
+- DN: `CN=PocketServer, OU=Palank, O=Palank, L=Seoul, ST=Seoul, C=KR`
 
 ## Current Status
 

@@ -2,6 +2,8 @@
 plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.android"
+    id "com.google.gms.google-services"
+    id "com.google.firebase.crashlytics"
 }
 
 // PRoot 바이너리 다운로드 태스크
@@ -62,9 +64,28 @@ tasks.named("preBuild").configure {
     dependsOn("downloadProot")
 }
 
+// Load signing keystore properties (safe if file doesn't exist yet)
+def keystorePropertiesFile = rootProject.file("../keystore/keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace "kr.co.palank.pocketserver"
     compileSdk 34
+
+    // Signing config — shared between pocket-server and pocket-monitor for IPC signature verification
+    if (keystorePropertiesFile.exists()) {
+        signingConfigs {
+            release {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
 
     defaultConfig {
         applicationId "kr.co.palank.pocketserver"
@@ -83,6 +104,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     compileOptions {
@@ -132,6 +156,11 @@ dependencies {
 
     // Google AdMob
     implementation "com.google.android.gms:play-services-ads:23.6.0"
+
+    // Firebase Crashlytics
+    implementation platform("com.google.firebase:firebase-bom:32.7.0")
+    implementation "com.google.firebase:firebase-crashlytics-ktx"
+    implementation "com.google.firebase:firebase-analytics-ktx"
 
     testImplementation "junit:junit:4.13.2"
     androidTestImplementation "androidx.test.ext:junit:1.1.5"

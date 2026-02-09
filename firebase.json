@@ -1,0 +1,9 @@
+{
+  "hosting": {
+    "public": "firebase-hosting/public",
+    "ignore": [
+      "firebase-debug.log",
+      ".firebase/**"
+    ]
+  }
+}

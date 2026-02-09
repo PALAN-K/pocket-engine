@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PocketServer Engine - Download</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f7; color: #1d1d1f; }
+    .container { max-width: 600px; margin: 0 auto; padding: 24px 16px; }
+    .hero { text-align: center; padding: 48px 0 32px; }
+    .hero h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+    .hero p { font-size: 16px; color: #86868b; }
+    .version { display: inline-block; background: #e8e8ed; padding: 4px 12px; border-radius: 12px; font-size: 13px; color: #6e6e73; margin-top: 12px; }
+    .download-btn { display: block; width: 100%; padding: 16px; background: #0071e3; color: #fff; border: none; border-radius: 12px; font-size: 18px; font-weight: 600; cursor: pointer; margin: 24px 0; text-decoration: none; text-align: center; }
+    .download-btn:hover { background: #0077ed; }
+    .card { background: #fff; border-radius: 16px; padding: 24px; margin-bottom: 16px; }
+    .card h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+    .step { display: flex; gap: 12px; margin-bottom: 16px; }
+    .step-num { width: 28px; height: 28px; background: #0071e3; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; }
+    .step-text { font-size: 15px; line-height: 1.5; }
+    .step-text strong { display: block; margin-bottom: 2px; }
+    .warning { background: #fff3cd; border-radius: 12px; padding: 16px; margin-top: 16px; font-size: 14px; line-height: 1.5; }
+    .warning strong { color: #856404; }
+    .faq-item { margin-bottom: 16px; }
+    .faq-item h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .faq-item p { font-size: 14px; color: #6e6e73; line-height: 1.5; }
+    .footer { text-align: center; padding: 32px 0; font-size: 13px; color: #86868b; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <h1>PocketServer Engine</h1>
+      <p>구형 스마트폰을 리눅스 서버로 변환하는 엔진</p>
+      <span class="version" id="version-badge">v1.0.0</span>
+    </div>
+
+    <a href="pocketserver-engine.apk" class="download-btn" id="download-btn">APK 다운로드</a>
+
+    <div class="card">
+      <h2>설치 방법</h2>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong>APK 다운로드</strong>
+          위의 버튼을 눌러 APK 파일을 다운로드하세요.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong>출처를 알 수 없는 앱 허용</strong>
+          설정 > 보안 > 출처를 알 수 없는 앱 설치 허용<br>
+          (Android 8.0+: 설정 > 앱 > 브라우저 > 알 수 없는 앱 설치 허용)
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong>APK 설치</strong>
+          다운로드된 APK 파일을 열어 설치하세요.
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-text">
+          <strong>서버 시작</strong>
+          PocketServer Engine을 실행하고 셋업 마법사를 따르세요.
+        </div>
+      </div>
+      <div class="warning">
+        <strong>PocketMonitor 앱을 먼저 설치하셨나요?</strong><br>
+        PocketMonitor(Play Store)를 설치하면 서버 상태를 모니터링하고 제어할 수 있습니다.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>FAQ</h2>
+      <div class="faq-item">
+        <h3>왜 Play Store에 없나요?</h3>
+        <p>PocketServer Engine은 리눅스 환경을 실행하는 앱으로, Google Play Store 정책상 사이드로드로만 배포됩니다. PocketMonitor는 Play Store에서 설치할 수 있습니다.</p>
+      </div>
+      <div class="faq-item">
+        <h3>안전한가요?</h3>
+        <p>PocketServer Engine은 오픈소스이며, PRoot 기반으로 루팅 없이 리눅스를 실행합니다. 기기에 영향을 주지 않습니다.</p>
+      </div>
+      <div class="faq-item">
+        <h3>최소 사양은?</h3>
+        <p>Android 8.0+, RAM 3GB+, 저장공간 8GB+, ARM64 프로세서가 필요합니다.</p>
+      </div>
+    </div>
+
+    <div class="footer">
+      &copy; 2026 Palank. All rights reserved.
+    </div>
+  </div>
+
+  <script>
+    fetch('version.json')
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('version-badge').textContent = 'v' + data.version;
+        document.getElementById('download-btn').href = data.url || 'pocketserver-engine.apk';
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

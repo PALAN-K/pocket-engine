@@ -6,11 +6,13 @@
 ## 현재 상태 요약
 
 - **아키텍처**: 2-App (PocketMonitor + PocketServer Engine)
-- **프로젝트 진행률**: ~15% (기존 코드 재활용 가능, 구조 재편 필요)
+- **프로젝트 진행률**: ~20% (구조 재편 완료, Firebase 설정 완료)
 - **이전 코드**: `pocket-server/` 에 Phase 1~4 코드 25개 파일 존재 (Engine으로 재활용)
 - **새로 필요**: `pocket-monitor/` 프로젝트 신규 생성
-- **다음 작업**: 프로젝트 구조 재편 → Engine IPC 서버 구현 → Monitor 앱 신규 개발
+- **다음 작업**: T1.1 Engine 프로젝트 정리 → T1.2 IPC 서버 구현
 - **GitHub**: https://github.com/naegeon/pocket-server.git (main)
+- **Firebase**: `pocket-server-palank` (Crashlytics + Hosting)
+- **서명 키스토어**: `keystore/pocketserver-release.jks` (양 앱 동일 키, gitignored)
 
 ## 아키텍처 개요
 
@@ -33,15 +35,20 @@ Google Play Store                    사이드로드 (Firebase Hosting)
 ## 프로젝트 디렉토리 구조
 
 ```
-android_linux/
-├── pocket-server/          ← Engine 앱 (기존 코드 재활용 + IPC 추가)
+android_linux/                     ← git root
+├── pocket-server/                 ← Engine 앱 (기존 코드 재활용 + IPC 추가)
+│   ├── app/google-services.json   ← Firebase 설정 (커밋됨)
 │   └── app/src/main/java/kr/co/palank/pocketserver/
-├── pocket-monitor/         ← Monitor 앱 (신규 생성)
+├── pocket-monitor/                ← Monitor 앱 (신규 생성 예정)
 │   └── app/src/main/java/kr/co/palank/pocketmonitor/
+├── firebase-hosting/public/       ← Engine APK 다운로드 페이지
+├── keystore/                      ← 서명 키스토어 (gitignored)
 ├── docs/
 │   ├── 01_BRAINSTORMING.md
-│   ├── 02_PRD.md           ← v2.0 (2-App 아키텍처)
-│   └── 03_TASK_ANCHOR.md   ← 이 파일
+│   ├── 02_PRD.md                  ← v2.0 (2-App 아키텍처)
+│   └── 03_TASK_ANCHOR.md          ← 이 파일
+├── firebase.json                  ← Firebase Hosting 설정
+├── .firebaserc                    ← Firebase 프로젝트 연결
 └── CLAUDE.md
 ```
 
@@ -104,12 +111,12 @@ android_linux/
 - [ ] ServerForegroundService에서 IpcServer 시작/종료 통합
 
 ### T1.3 Firebase Crashlytics 통합
-- [ ] Engine build.gradle에 Firebase Crashlytics SDK 추가
-- [ ] google-services.json 설정 (Firebase 프로젝트 연결)
-- [ ] 크래시 로그 자동 수집 확인
+- [x] Engine build.gradle에 Firebase Crashlytics SDK 추가
+- [x] google-services.json 설정 (Firebase 프로젝트: `pocket-server-palank`)
+- [ ] 크래시 로그 자동 수집 확인 (빌드 후 테스트 필요)
 
 ### T1.4 자동 업데이트 체크
-- [ ] Firebase Hosting에 version.json 배치: `{"version":"1.0.0","url":"https://..."}`
+- [x] Firebase Hosting에 version.json 배치: `firebase-hosting/public/version.json`
 - [ ] Engine 앱 실행 시 version.json 조회 → 현재 버전과 비교
 - [ ] 업데이트 가능 시 상단 배너 표시 → 탭하면 브라우저로 다운로드 페이지
 
@@ -181,17 +188,18 @@ android_linux/
 ## Phase 3: Firebase Hosting — "Engine 배포"
 
 ### T3.1 Firebase 프로젝트 설정
-- [ ] Firebase 프로젝트 생성
-- [ ] Firebase Hosting 활성화
+- [x] Firebase 프로젝트 생성 (`pocket-server-palank`)
+- [x] Firebase Hosting 설정 (firebase.json + .firebaserc)
 - [ ] 커스텀 도메인 설정 (선택)
+- [ ] `firebase deploy --only hosting` 으로 첫 배포
 
 ### T3.2 배포 웹페이지
-- [ ] Engine APK 다운로드 페이지 HTML
+- [x] Engine APK 다운로드 페이지 HTML (`firebase-hosting/public/index.html`)
   - 다운로드 버튼
-  - 설치 가이드 (출처를 알 수 없는 앱 허용 방법, 스크린샷 포함)
+  - 설치 가이드 (출처를 알 수 없는 앱 허용 방법)
   - FAQ
-- [ ] Engine APK 업로드
-- [ ] 배포 URL 확정
+- [ ] Engine APK 업로드 (`firebase-hosting/public/pocketserver-engine.apk`)
+- [ ] 배포 URL 확정 (`pocket-server-palank.web.app`)
 
 ---
 
