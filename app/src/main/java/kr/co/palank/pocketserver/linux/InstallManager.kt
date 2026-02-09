@@ -29,6 +29,7 @@ class InstallManager(private val context: Context) {
     val state: StateFlow<InstallState> = _state
 
     private val prootManager = ProotManager(context)
+    private val swapManager = SwapManager(context, prootManager)
     private val prefs: SharedPreferences
         get() = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -66,16 +67,20 @@ class InstallManager(private val context: Context) {
                 _state.value = InstallState.Progress(60, "기존 rootfs 감지됨, 건너뜀")
             }
 
-            // Step 4: 시스템 설정 (60-75%)
+            // Step 4: 시스템 설정 (60-72%)
             _state.value = InstallState.Progress(60, "시스템 설정 중...")
             configureSystem()
 
-            // Step 5: Dropbear 설치 (75-90%)
-            _state.value = InstallState.Progress(75, "SSH 서버 설치 중...")
+            // Step 5: 스왑 메모리 설정 (72-78%)
+            _state.value = InstallState.Progress(72, "스왑 메모리 설정 중...")
+            setupSwap()
+
+            // Step 6: Dropbear 설치 (78-92%)
+            _state.value = InstallState.Progress(78, "SSH 서버 설치 중...")
             installDropbear()
 
-            // Step 6: 최종 검증 (90-100%)
-            _state.value = InstallState.Progress(90, "설치 검증 중...")
+            // Step 7: 최종 검증 (92-100%)
+            _state.value = InstallState.Progress(92, "설치 검증 중...")
             verifyInstallation()
 
             prefs.edit().putBoolean(KEY_INSTALLED, true).apply()
@@ -189,22 +194,22 @@ class InstallManager(private val context: Context) {
     }
 
     private suspend fun configureSystem() {
-        _state.value = InstallState.Progress(62, "DNS 설정 중...")
+        _state.value = InstallState.Progress(61, "DNS 설정 중...")
         prootManager.exec("/bin/sh", "-c",
             "echo 'nameserver 8.8.8.8' > /etc/resolv.conf && echo 'nameserver 8.8.4.4' >> /etc/resolv.conf"
         )
 
-        _state.value = InstallState.Progress(65, "로케일 설정 중...")
+        _state.value = InstallState.Progress(63, "로케일 설정 중...")
         prootManager.exec("/bin/sh", "-c",
             "echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen"
         )
 
-        _state.value = InstallState.Progress(68, "타임존 설정 중...")
+        _state.value = InstallState.Progress(65, "타임존 설정 중...")
         prootManager.exec("/bin/sh", "-c",
             "ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime"
         )
 
-        _state.value = InstallState.Progress(70, "사용자 계정 생성 중...")
+        _state.value = InstallState.Progress(67, "사용자 계정 생성 중...")
         val password = generatePassword()
         prefs.edit().putString(KEY_SSH_PASSWORD, password).apply()
 
@@ -219,8 +224,17 @@ class InstallManager(private val context: Context) {
         Log.i(TAG, "System configured, user 'pocketserver' created")
     }
 
+    private suspend fun setupSwap() {
+        _state.value = InstallState.Progress(73, "스왑 파일 생성 중... (약 1-2분 소요)")
+        val success = swapManager.setup()
+        if (!success) {
+            Log.w(TAG, "Swap setup failed, continuing without swap")
+        }
+        _state.value = InstallState.Progress(78, "스왑 메모리 설정 완료")
+    }
+
     private suspend fun installDropbear() {
-        _state.value = InstallState.Progress(76, "패키지 목록 업데이트 중...")
+        _state.value = InstallState.Progress(79, "패키지 목록 업데이트 중...")
         val updateResult = prootManager.exec("/bin/sh", "-c",
             "apt-get update -qq"
         )
@@ -228,7 +242,7 @@ class InstallManager(private val context: Context) {
             Log.w(TAG, "apt-get update warning: ${updateResult.output.takeLast(200)}")
         }
 
-        _state.value = InstallState.Progress(82, "Dropbear SSH 서버 설치 중...")
+        _state.value = InstallState.Progress(83, "Dropbear SSH 서버 설치 중...")
         val installResult = prootManager.exec("/bin/sh", "-c",
             "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dropbear"
         )
@@ -236,7 +250,7 @@ class InstallManager(private val context: Context) {
             throw RuntimeException("Dropbear 설치 실패: ${installResult.output.takeLast(300)}")
         }
 
-        _state.value = InstallState.Progress(88, "SSH 서버 설정 중...")
+        _state.value = InstallState.Progress(89, "SSH 서버 설정 중...")
         // Dropbear 기본 설정: 포트 2022, 비밀번호 인증
         prootManager.exec("/bin/sh", "-c",
             "mkdir -p /etc/dropbear && " +
@@ -257,7 +271,7 @@ class InstallManager(private val context: Context) {
     }
 
     private suspend fun verifyInstallation() {
-        _state.value = InstallState.Progress(92, "설치 검증 중...")
+        _state.value = InstallState.Progress(93, "설치 검증 중...")
 
         val bashCheck = prootManager.exec("/bin/bash", "-c", "echo 'ok'")
         if (!bashCheck.isSuccess || !bashCheck.output.contains("ok")) {

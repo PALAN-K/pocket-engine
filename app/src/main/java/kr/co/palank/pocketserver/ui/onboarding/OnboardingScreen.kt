@@ -1,10 +1,736 @@
 package kr.co.palank.pocketserver.ui.onboarding
 
+import android.app.Activity
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kr.co.palank.pocketserver.ad.AdManager
+import kr.co.palank.pocketserver.linux.InstallState
+import kr.co.palank.pocketserver.linux.SessionManager
+import kr.co.palank.pocketserver.monitor.NetworkMonitor
+import kr.co.palank.pocketserver.ui.theme.PocketServerExtendedTheme
 import kr.co.palank.pocketserver.util.DeviceSpec
 
 @Composable
-fun OnboardingScreen(spec: DeviceSpec, onStartInstall: () -> Unit) {
-    Text("온보딩 화면 준비 중...")
+fun OnboardingScreen(
+    spec: DeviceSpec,
+    sessionManager: SessionManager,
+    networkMonitor: NetworkMonitor,
+    onNavigateToDashboard: () -> Unit,
+    onNavigateToOptimizationGuide: () -> Unit,
+) {
+    val installState by sessionManager.installState.collectAsState()
+    val networkState by networkMonitor.state.collectAsState()
+
+    var currentPhase by remember { mutableStateOf("spec_check") }
+
+    // React to install state changes
+    when (installState) {
+        is InstallState.Progress -> {
+            if (currentPhase != "installing") {
+                currentPhase = "installing"
+            }
+        }
+        is InstallState.Completed -> {
+            if (currentPhase != "completed") {
+                currentPhase = "completed"
+            }
+        }
+        is InstallState.Error -> {
+            if (currentPhase != "error") {
+                currentPhase = "error"
+            }
+        }
+        is InstallState.Idle -> { /* keep current phase */ }
+    }
+
+    val colorScheme = MaterialTheme.colorScheme
+
+    AnimatedContent(
+        targetState = currentPhase,
+        transitionSpec = {
+            (slideInHorizontally { it } + fadeIn())
+                .togetherWith(slideOutHorizontally { -it } + fadeOut())
+        },
+        label = "onboarding_phase",
+    ) { phase ->
+        when (phase) {
+            "spec_check" -> OnboardingSpecCheckPhase(
+                spec = spec,
+                onStartInstall = {
+                    sessionManager.install()
+                    currentPhase = "installing"
+                },
+            )
+            "installing" -> OnboardingInstallingPhase(
+                installState = installState,
+            )
+            "completed" -> OnboardingCompletedPhase(
+                sshPassword = sessionManager.sshPassword,
+                sshPort = sessionManager.sshPort,
+                ipAddress = networkState.ipAddress,
+                onNavigateToDashboard = onNavigateToDashboard,
+                onNavigateToOptimizationGuide = onNavigateToOptimizationGuide,
+            )
+            "error" -> OnboardingErrorPhase(
+                errorMessage = (installState as? InstallState.Error)?.error ?: "알 수 없는 오류",
+                onRetry = {
+                    currentPhase = "spec_check"
+                },
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase A: Spec Check
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun OnboardingSpecCheckPhase(
+    spec: DeviceSpec,
+    onStartInstall: () -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extColors = PocketServerExtendedTheme.colors
+    val allSpecsOk = spec.isVersionOk && spec.isRamOk && spec.isStorageOk && spec.isArchOk
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .padding(horizontal = 24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(modifier = Modifier.height(80.dp))
+
+        // Logo / Title
+        Text(
+            text = "PocketServer",
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold,
+            color = colorScheme.primary,
+            letterSpacing = (-0.5).sp,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "서랍 속 스마트폰이\n나만의 서버가 됩니다",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            color = extColors.textSecondary,
+            textAlign = TextAlign.Center,
+            lineHeight = 26.sp,
+        )
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        // Install button
+        Button(
+            onClick = onStartInstall,
+            enabled = allSpecsOk,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colorScheme.primary,
+                contentColor = colorScheme.onPrimary,
+                disabledContainerColor = colorScheme.outline,
+                disabledContentColor = extColors.textSecondary,
+            ),
+        ) {
+            Text(
+                text = "서버 설치 시작하기",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+
+        if (!allSpecsOk) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "기기 사양이 최소 요구사항을 충족하지 않습니다",
+                fontSize = 13.sp,
+                color = extColors.statusRed,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // Spec check results
+        Text(
+            text = "기기 사양",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = extColors.textSecondary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+        )
+
+        OnboardingSpecRow(
+            label = spec.androidVersion,
+            isOk = spec.isVersionOk,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OnboardingSpecRow(
+            label = "RAM ${String.format("%.1f", spec.ramSizeGb)}GB",
+            isOk = spec.isRamOk,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OnboardingSpecRow(
+            label = "저장공간 ${spec.storageFreeGb}GB 여유",
+            isOk = spec.isStorageOk,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OnboardingSpecRow(
+            label = "${spec.arch} 프로세서",
+            isOk = spec.isArchOk,
+        )
+
+        Spacer(modifier = Modifier.height(40.dp))
+    }
+}
+
+@Composable
+private fun OnboardingSpecRow(
+    label: String,
+    isOk: Boolean,
+) {
+    val extColors = PocketServerExtendedTheme.colors
+    val colorScheme = MaterialTheme.colorScheme
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(
+                    if (isOk) extColors.statusGreenBg
+                    else extColors.statusRedBg
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (isOk) "\u2713" else "\u2717",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isOk) extColors.statusGreen else extColors.statusRed,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Text(
+            text = label,
+            fontSize = 16.sp,
+            color = colorScheme.onBackground,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase B: Installing
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun OnboardingInstallingPhase(
+    installState: InstallState,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extColors = PocketServerExtendedTheme.colors
+
+    val percentage = when (installState) {
+        is InstallState.Progress -> installState.percentage
+        is InstallState.Completed -> 100
+        else -> 0
+    }
+    val message = when (installState) {
+        is InstallState.Progress -> installState.message
+        is InstallState.Completed -> "설치 완료!"
+        else -> "준비 중..."
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "서버를 설치하고 있습니다",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = colorScheme.onBackground,
+        )
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // Progress bar
+        LinearProgressIndicator(
+            progress = percentage / 100f,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            color = colorScheme.primary,
+            trackColor = colorScheme.surfaceVariant,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Percentage
+        Text(
+            text = "${percentage}%",
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold,
+            color = colorScheme.primary,
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Current step
+        Text(
+            text = message,
+            fontSize = 15.sp,
+            color = extColors.textSecondary,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Text(
+            text = "예상 소요시간: 약 5-10분",
+            fontSize = 13.sp,
+            color = extColors.textSecondary.copy(alpha = 0.7f),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "설치 중에는 앱을 종료하지 마세요",
+            fontSize = 13.sp,
+            color = extColors.statusAmber,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase C: Completed
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun OnboardingCompletedPhase(
+    sshPassword: String?,
+    sshPort: Int,
+    ipAddress: String?,
+    onNavigateToDashboard: () -> Unit,
+    onNavigateToOptimizationGuide: () -> Unit,
+) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val colorScheme = MaterialTheme.colorScheme
+    val extColors = PocketServerExtendedTheme.colors
+    val clipboardManager = LocalClipboardManager.current
+
+    var showPassword by remember { mutableStateOf(false) }
+
+    val displayIp = ipAddress ?: "IP 확인 중..."
+    val displayPassword = sshPassword ?: "--------"
+    val sshCommand = "ssh pocketserver@$displayIp -p $sshPort"
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .padding(horizontal = 24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(modifier = Modifier.height(64.dp))
+
+        // Success icon
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(extColors.statusGreenBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "\u2713",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = extColors.statusGreen,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "서버 준비 완료!",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+            color = colorScheme.onBackground,
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // SSH info card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = extColors.cardBackground,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+            ) {
+                Text(
+                    text = "SSH 접속 정보",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colorScheme.onSurface,
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OnboardingSshInfoRow(label = "주소", value = displayIp)
+                Spacer(modifier = Modifier.height(10.dp))
+                OnboardingSshInfoRow(label = "포트", value = "$sshPort")
+                Spacer(modifier = Modifier.height(10.dp))
+                OnboardingSshInfoRow(label = "사용자", value = "pocketserver")
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Password row with toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "비밀번호",
+                        fontSize = 14.sp,
+                        color = extColors.textSecondary,
+                        modifier = Modifier.width(72.dp),
+                    )
+                    Text(
+                        text = if (showPassword) displayPassword else "********",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace,
+                        color = colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Action buttons: Copy + Show password
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val info = buildString {
+                                appendLine("주소: $displayIp")
+                                appendLine("포트: $sshPort")
+                                appendLine("사용자: pocketserver")
+                                appendLine("비밀번호: $displayPassword")
+                            }
+                            clipboardManager.setText(AnnotatedString(info))
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = colorScheme.primary,
+                        ),
+                    ) {
+                        Text(
+                            text = "복사",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = { showPassword = !showPassword },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = colorScheme.primary,
+                        ),
+                    ) {
+                        Text(
+                            text = if (showPassword) "비밀번호 숨기기" else "비밀번호 보기",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // SSH command section
+        Text(
+            text = "PC에서 접속하기:",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = extColors.textSecondary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = extColors.cardBackground,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = sshCommand,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(sshCommand))
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = colorScheme.primary,
+                    ),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
+                    Text(
+                        text = "복사",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // Navigate to optimization guide first, then dashboard (show interstitial ad once)
+        Button(
+            onClick = {
+                activity?.let { act ->
+                    AdManager.showInterstitialOnce(act) {
+                        onNavigateToOptimizationGuide()
+                    }
+                } ?: onNavigateToOptimizationGuide()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colorScheme.primary,
+                contentColor = colorScheme.onPrimary,
+            ),
+        ) {
+            Text(
+                text = "대시보드로 이동",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(40.dp))
+    }
+}
+
+@Composable
+private fun OnboardingSshInfoRow(
+    label: String,
+    value: String,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extColors = PocketServerExtendedTheme.colors
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            color = extColors.textSecondary,
+            modifier = Modifier.width(72.dp),
+        )
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = FontFamily.Monospace,
+            color = colorScheme.onSurface,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Error Phase
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun OnboardingErrorPhase(
+    errorMessage: String,
+    onRetry: () -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extColors = PocketServerExtendedTheme.colors
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        // Error icon
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(extColors.statusRedBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "!",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = extColors.statusRed,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "설치 중 오류가 발생했습니다",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = colorScheme.onBackground,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = extColors.statusRedBg,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Text(
+                text = errorMessage,
+                fontSize = 14.sp,
+                color = extColors.statusRed,
+                lineHeight = 20.sp,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Button(
+            onClick = onRetry,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colorScheme.primary,
+                contentColor = colorScheme.onPrimary,
+            ),
+        ) {
+            Text(
+                text = "다시 시도",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
 }
