@@ -6,10 +6,10 @@
 ## 현재 상태 요약
 
 - **아키텍처**: 2-App (PocketMonitor + PocketServer Engine)
-- **프로젝트 진행률**: ~35% (Phase 1 완료, Engine 빌드 성공)
+- **프로젝트 진행률**: ~65% (Phase 1 + Phase 2 완료)
 - **Engine 상태**: Phase 1 완료 — IPC 서버 + 업데이트 체크 + AdMob 제거 + 빌드 성공 (14.4MB debug APK)
-- **새로 필요**: `pocket-monitor/` 프로젝트 신규 생성
-- **다음 작업**: Phase 2 — T2.1 Monitor 프로젝트 생성
+- **Monitor 상태**: Phase 2 완료 — 대시보드 + IPC + 알림 + AdMob + 빌드 성공 (16MB debug APK)
+- **다음 작업**: Phase 3 — T3.1 Firebase Hosting 배포 + Phase 4 통합 테스트
 - **GitHub**: https://github.com/naegeon/pocket-server.git (main)
 - **Firebase**: `pocket-server-palank` (Crashlytics + Hosting)
 - **서명 키스토어**: `keystore/pocketserver-release.jks` (양 앱 동일 키, gitignored)
@@ -132,55 +132,60 @@ android_linux/                     ← git root
 
 > 신규 pocket-monitor 프로젝트 생성, 디바이스 모니터링 + Engine IPC 연동
 
-### T2.1 프로젝트 생성
-- [ ] `pocket-monitor/` Gradle 프로젝트 생성
+### T2.1 프로젝트 생성 ✅
+- [x] `pocket-monitor/` Gradle 프로젝트 생성
   - 패키지: `kr.co.palank.pocketmonitor`
   - minSdk 26, targetSdk 34
   - Jetpack Compose + Material3
-  - AdMob SDK 의존성
+  - AdMob SDK 23.6.0 의존성
+  - WorkManager 2.9.1, lifecycle-process 2.6.2
 
-### T2.2 독립 디바이스 모니터링
-- [ ] `monitor/DeviceMonitor.kt`: CPU/RAM/온도/저장공간 자체 모니터링
-- [ ] `monitor/HistoryTracker.kt`: 24시간 히스토리 기록 (Room DB 또는 파일)
-- [ ] `util/BatteryMonitor.kt`: 배터리 온도 모니터링 (기존 코드 복사)
+### T2.2 독립 디바이스 모니터링 ✅
+- [x] `monitor/DeviceMonitor.kt`: CPU/RAM/온도/저장공간/배터리 자체 모니터링 (2초 폴링)
+- [x] `monitor/HistoryTracker.kt`: 24시간 히스토리 기록 (인메모리 링버퍼, 분당 1회, 1440 포인트)
+- [x] `util/BatteryMonitor.kt`: 배터리 온도 모니터링 + 임계치 정의 (40/45/50°C)
 
-### T2.3 대시보드 UI
-- [ ] `ui/dashboard/DashboardScreen.kt`: 메인 대시보드
-  - CPU/RAM/온도/저장공간 카드
-  - 24시간 온도 히스토리 그래프
-  - Engine 연동 시: 서버 상태 + SSH 정보 + 제어 버튼
-  - Engine 미연동 시: "서버 엔진 필요" 안내 카드
-  - 하단 AdMob 배너
-- [ ] `ui/dashboard/DashboardViewModel.kt`: 상태 관리
-- [ ] `ui/settings/SettingsScreen.kt`: 알림 설정, 서버 연동 안내
-- [ ] `ui/theme/`: Color.kt + Theme.kt (기존 코드 복사)
+### T2.3 대시보드 UI ✅
+- [x] `ui/dashboard/DashboardScreen.kt`: 메인 대시보드
+  - CPU/RAM/온도/저장공간 카드 (상태색 표시)
+  - 24시간 온도 히스토리 그래프 (Canvas 기반 라인 차트)
+  - Engine 연동 시: 서버 상태 카드 + SSH 정보 + 시작/중지/재시작 버튼
+  - Engine 미연동 시: "서버 엔진 필요" 안내 카드 + Firebase Hosting 링크
+  - 하단 AdMob 배너 (Scaffold bottomBar)
+- [x] `ui/dashboard/DashboardViewModel.kt`: 상태 관리 (AndroidViewModel)
+- [x] `ui/settings/SettingsScreen.kt`: 알림 설정 토글, 서버 연동 상태, 앱 정보
+- [x] `ui/theme/`: Color.kt + Theme.kt (Engine에서 복사, PocketMonitor 패키지로 변경)
 
-### T2.4 Engine IPC 클라이언트
-- [ ] `ipc/EngineConnector.kt`: LocalSocket 클라이언트
-  - 2초 간격 상태 폴링
+### T2.4 Engine IPC 클라이언트 ✅
+- [x] `ipc/EngineConnector.kt`: LocalSocket 클라이언트
+  - 2초 간격 상태 폴링 (handshake → status)
   - 시작/중지/재시작 명령 전송
-  - 연결 실패 시 "Engine 미연동" 상태 표시
-- [ ] `ipc/AlertReceiver.kt`: BroadcastReceiver
-  - Engine에서 온도 경고 / 크래시 알림 수신
-  - 푸시 알림 생성
+  - 연결 실패 시 exponential backoff (2s→4s→8s→최대 30s)
+  - 10회 연속 실패 시 "Engine 미연동" 상태 표시
+- [x] `ipc/AlertReceiver.kt`: BroadcastReceiver
+  - Engine에서 온도 경고 / 크래시 알림 수신 (4가지 타입)
+  - AlertNotifier 호출하여 푸시 알림 생성
 
-### T2.5 푸시 알림 시스템
-- [ ] `notification/DailyReportScheduler.kt`: WorkManager 매일 오전 9시
-  - Engine 상태 조회 → 일일 리포트 알림 생성
-  - Engine 미연동 시: 디바이스 상태만 포함
-- [ ] `notification/WeeklyReportScheduler.kt`: WorkManager 매주 일요일
-- [ ] `notification/AlertNotifier.kt`: 온도 경고 알림 (AlertReceiver에서 호출)
+### T2.5 푸시 알림 시스템 ✅
+- [x] `notification/DailyReportScheduler.kt`: OneTimeWorkRequest 매일 오전 9시
+  - 실행 후 다음날 9시로 재스케줄 (드리프트 방지)
+  - 디바이스 온도/배터리 리포트 알림 생성
+- [x] `notification/WeeklyReportScheduler.kt`: OneTimeWorkRequest 매주 일요일 9시
+  - 실행 후 다음 일요일로 재스케줄
+- [x] `notification/AlertNotifier.kt`: 온도 경고/위험/크래시/재시작 알림 (4종)
 
-### T2.6 AdMob 통합
-- [ ] `ad/AdManager.kt`: AdMob 관리
-  - 배너 광고: 대시보드 하단
-  - App Open Ad (앱 진입): Application.ActivityLifecycleCallbacks로 구현
+### T2.6 AdMob 통합 ✅
+- [x] `ad/AdManager.kt`: AdMob 관리
+  - BannerAd 컴포저블 (AndroidView 래퍼, 수명주기 관리)
+  - AppOpenAdManager (Application.ActivityLifecycleCallbacks + ProcessLifecycleOwner)
+  - 앱 포그라운드 진입 시 App Open Ad 표시 (4시간 만료 관리)
   - 앱 이탈 시 광고 없음 (AdMob 정책 준수)
-- [ ] AndroidManifest.xml에 AdMob APPLICATION_ID 메타데이터
-- [ ] 테스트 광고 ID 사용 → 출시 전 실제 ID 교체
+- [x] `PocketMonitorApp.kt`: Application 클래스 (MobileAds 초기화 + AppOpenAdManager)
+- [x] AndroidManifest.xml에 AdMob APPLICATION_ID 메타데이터 (테스트 ID)
+- [x] 테스트 광고 ID 사용 → 출시 전 실제 ID 교체
 
 ### T2.7 빌드 및 Play Store 준비
-- [ ] Monitor APK 빌드 성공 확인
+- [x] Monitor APK 빌드 성공 확인 (debug: 16MB)
 - [ ] Play Store 리스팅 준비 (스크린샷, 설명, 카테고리)
 - [ ] 개인정보 처리방침 작성
 
