@@ -1,20 +1,38 @@
 package kr.co.palank.pocketserver
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import kr.co.palank.pocketserver.ad.AdManager
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kr.co.palank.pocketserver.linux.SessionManager
 import kr.co.palank.pocketserver.manufacturer.OptimizationGuideScreen
 import kr.co.palank.pocketserver.monitor.NetworkMonitor
-import kr.co.palank.pocketserver.ui.dashboard.DashboardScreen
-import kr.co.palank.pocketserver.ui.dashboard.DashboardViewModel
-import kr.co.palank.pocketserver.ui.onboarding.OnboardingScreen
-import kr.co.palank.pocketserver.ui.settings.SettingsScreen
+import kr.co.palank.pocketserver.ui.setup.SetupWizardScreen
 import kr.co.palank.pocketserver.ui.theme.PocketServerTheme
 import kr.co.palank.pocketserver.util.SpecChecker
+import kr.co.palank.pocketserver.util.UpdateChecker
+import kr.co.palank.pocketserver.util.UpdateInfo
 
 class MainActivity : ComponentActivity() {
 
@@ -22,66 +40,94 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        AdManager.initialize(this)
-        AdManager.loadInterstitial(this)
-
         setContent {
             PocketServerTheme {
                 val sessionManager = remember { SessionManager(this@MainActivity) }
                 val networkMonitor = remember { NetworkMonitor(this@MainActivity) }
                 val spec = remember { SpecChecker.check(this@MainActivity) }
 
-                // Start network monitoring and set DashboardViewModel companions
                 DisposableEffect(Unit) {
                     networkMonitor.start()
-                    DashboardViewModel.sessionManager = sessionManager
-                    DashboardViewModel.networkMonitor = networkMonitor
                     onDispose {
                         networkMonitor.stop()
-                        DashboardViewModel.sessionManager = null
-                        DashboardViewModel.networkMonitor = null
                     }
                 }
 
-                // Initial screen: onboarding if not installed, dashboard if installed
-                val initialScreen = if (sessionManager.isInstalled) "dashboard" else "onboarding"
-                var currentScreen by remember { mutableStateOf(initialScreen) }
+                // Update check
+                var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+                val coroutineScope = rememberCoroutineScope()
+                LaunchedEffect(Unit) {
+                    coroutineScope.launch {
+                        updateInfo = UpdateChecker.check(this@MainActivity)
+                    }
+                }
 
-                when (currentScreen) {
-                    "onboarding" -> OnboardingScreen(
-                        spec = spec,
-                        sessionManager = sessionManager,
-                        networkMonitor = networkMonitor,
-                        onNavigateToDashboard = {
-                            currentScreen = "dashboard"
-                        },
-                        onNavigateToOptimizationGuide = {
-                            currentScreen = "optimization_guide"
-                        },
-                    )
+                var currentScreen by remember {
+                    mutableStateOf(if (sessionManager.isInstalled) "setup" else "setup")
+                }
 
-                    "optimization_guide" -> OptimizationGuideScreen(
-                        onDismiss = {
-                            currentScreen = "dashboard"
-                        },
-                    )
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Update banner
+                    val update = updateInfo
+                    if (update != null && update.hasUpdate) {
+                        UpdateBanner(
+                            latestVersion = update.latestVersion,
+                            onTap = {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl)))
+                            },
+                        )
+                    }
 
-                    "dashboard" -> DashboardScreen(
-                        onNavigateToSettings = {
-                            currentScreen = "settings"
-                        },
-                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        when (currentScreen) {
+                            "setup" -> SetupWizardScreen(
+                                spec = spec,
+                                sessionManager = sessionManager,
+                                networkMonitor = networkMonitor,
+                                onNavigateToOptimizationGuide = {
+                                    currentScreen = "optimization_guide"
+                                },
+                            )
 
-                    "settings" -> SettingsScreen(
-                        sessionManager = sessionManager,
-                        onNavigateBack = {
-                            // After reset, isInstalled becomes false -> go to onboarding
-                            // Otherwise, go back to dashboard
-                            currentScreen = if (sessionManager.isInstalled) "dashboard" else "onboarding"
-                        },
-                    )
+                            "optimization_guide" -> OptimizationGuideScreen(
+                                onDismiss = {
+                                    this@MainActivity.finish()
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun UpdateBanner(
+    latestVersion: String,
+    onTap: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable(onClick = onTap)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "v$latestVersion 업데이트 가능",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "다운로드",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }

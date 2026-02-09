@@ -1,6 +1,7 @@
-package kr.co.palank.pocketserver.ui.onboarding
+package kr.co.palank.pocketserver.ui.setup
 
-import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -48,7 +49,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kr.co.palank.pocketserver.ad.AdManager
 import kr.co.palank.pocketserver.linux.InstallState
 import kr.co.palank.pocketserver.linux.SessionManager
 import kr.co.palank.pocketserver.monitor.NetworkMonitor
@@ -56,11 +56,10 @@ import kr.co.palank.pocketserver.ui.theme.PocketServerExtendedTheme
 import kr.co.palank.pocketserver.util.DeviceSpec
 
 @Composable
-fun OnboardingScreen(
+fun SetupWizardScreen(
     spec: DeviceSpec,
     sessionManager: SessionManager,
     networkMonitor: NetworkMonitor,
-    onNavigateToDashboard: () -> Unit,
     onNavigateToOptimizationGuide: () -> Unit,
 ) {
     val installState by sessionManager.installState.collectAsState()
@@ -88,35 +87,32 @@ fun OnboardingScreen(
         is InstallState.Idle -> { /* keep current phase */ }
     }
 
-    val colorScheme = MaterialTheme.colorScheme
-
     AnimatedContent(
         targetState = currentPhase,
         transitionSpec = {
             (slideInHorizontally { it } + fadeIn())
                 .togetherWith(slideOutHorizontally { -it } + fadeOut())
         },
-        label = "onboarding_phase",
+        label = "setup_wizard_phase",
     ) { phase ->
         when (phase) {
-            "spec_check" -> OnboardingSpecCheckPhase(
+            "spec_check" -> SpecCheckPhase(
                 spec = spec,
                 onStartInstall = {
                     sessionManager.install()
                     currentPhase = "installing"
                 },
             )
-            "installing" -> OnboardingInstallingPhase(
+            "installing" -> InstallingPhase(
                 installState = installState,
             )
-            "completed" -> OnboardingCompletedPhase(
+            "completed" -> CompletedPhase(
                 sshPassword = sessionManager.sshPassword,
                 sshPort = sessionManager.sshPort,
                 ipAddress = networkState.ipAddress,
-                onNavigateToDashboard = onNavigateToDashboard,
                 onNavigateToOptimizationGuide = onNavigateToOptimizationGuide,
             )
-            "error" -> OnboardingErrorPhase(
+            "error" -> ErrorPhase(
                 errorMessage = (installState as? InstallState.Error)?.error ?: "알 수 없는 오류",
                 onRetry = {
                     currentPhase = "spec_check"
@@ -131,7 +127,7 @@ fun OnboardingScreen(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun OnboardingSpecCheckPhase(
+private fun SpecCheckPhase(
     spec: DeviceSpec,
     onStartInstall: () -> Unit,
 ) {
@@ -149,7 +145,6 @@ private fun OnboardingSpecCheckPhase(
     ) {
         Spacer(modifier = Modifier.height(80.dp))
 
-        // Logo / Title
         Text(
             text = "PocketServer",
             fontSize = 32.sp,
@@ -171,7 +166,6 @@ private fun OnboardingSpecCheckPhase(
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        // Install button
         Button(
             onClick = onStartInstall,
             enabled = allSpecsOk,
@@ -206,7 +200,6 @@ private fun OnboardingSpecCheckPhase(
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // Spec check results
         Text(
             text = "기기 사양",
             fontSize = 14.sp,
@@ -217,35 +210,20 @@ private fun OnboardingSpecCheckPhase(
                 .padding(bottom = 16.dp),
         )
 
-        OnboardingSpecRow(
-            label = spec.androidVersion,
-            isOk = spec.isVersionOk,
-        )
+        SpecRow(label = spec.androidVersion, isOk = spec.isVersionOk)
         Spacer(modifier = Modifier.height(12.dp))
-
-        OnboardingSpecRow(
-            label = "RAM ${String.format("%.1f", spec.ramSizeGb)}GB",
-            isOk = spec.isRamOk,
-        )
+        SpecRow(label = "RAM ${String.format("%.1f", spec.ramSizeGb)}GB", isOk = spec.isRamOk)
         Spacer(modifier = Modifier.height(12.dp))
-
-        OnboardingSpecRow(
-            label = "저장공간 ${spec.storageFreeGb}GB 여유",
-            isOk = spec.isStorageOk,
-        )
+        SpecRow(label = "저장공간 ${spec.storageFreeGb}GB 여유", isOk = spec.isStorageOk)
         Spacer(modifier = Modifier.height(12.dp))
-
-        OnboardingSpecRow(
-            label = "${spec.arch} 프로세서",
-            isOk = spec.isArchOk,
-        )
+        SpecRow(label = "${spec.arch} 프로세서", isOk = spec.isArchOk)
 
         Spacer(modifier = Modifier.height(40.dp))
     }
 }
 
 @Composable
-private fun OnboardingSpecRow(
+private fun SpecRow(
     label: String,
     isOk: Boolean,
 ) {
@@ -289,7 +267,7 @@ private fun OnboardingSpecRow(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun OnboardingInstallingPhase(
+private fun InstallingPhase(
     installState: InstallState,
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -323,7 +301,6 @@ private fun OnboardingInstallingPhase(
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // Progress bar
         LinearProgressIndicator(
             progress = percentage / 100f,
             modifier = Modifier
@@ -336,7 +313,6 @@ private fun OnboardingInstallingPhase(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Percentage
         Text(
             text = "${percentage}%",
             fontSize = 32.sp,
@@ -346,7 +322,6 @@ private fun OnboardingInstallingPhase(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Current step
         Text(
             text = message,
             fontSize = 15.sp,
@@ -377,15 +352,13 @@ private fun OnboardingInstallingPhase(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun OnboardingCompletedPhase(
+private fun CompletedPhase(
     sshPassword: String?,
     sshPort: Int,
     ipAddress: String?,
-    onNavigateToDashboard: () -> Unit,
     onNavigateToOptimizationGuide: () -> Unit,
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
     val colorScheme = MaterialTheme.colorScheme
     val extColors = PocketServerExtendedTheme.colors
     val clipboardManager = LocalClipboardManager.current
@@ -454,11 +427,11 @@ private fun OnboardingCompletedPhase(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                OnboardingSshInfoRow(label = "주소", value = displayIp)
+                SshInfoRow(label = "주소", value = displayIp)
                 Spacer(modifier = Modifier.height(10.dp))
-                OnboardingSshInfoRow(label = "포트", value = "$sshPort")
+                SshInfoRow(label = "포트", value = "$sshPort")
                 Spacer(modifier = Modifier.height(10.dp))
-                OnboardingSshInfoRow(label = "사용자", value = "pocketserver")
+                SshInfoRow(label = "사용자", value = "pocketserver")
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Password row with toggle
@@ -590,17 +563,95 @@ private fun OnboardingCompletedPhase(
             }
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        // Navigate to optimization guide first, then dashboard (show interstitial ad once)
+        // PocketMonitor 설치 안내 카드
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = colorScheme.primaryContainer,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "PocketMonitor를 설치하면\n매일 서버 상태를 확인하고\n안전하게 관리할 수 있습니다",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = colorScheme.onPrimaryContainer,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 22.sp,
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://play.google.com/store/apps/details?id=kr.co.palank.pocketmonitor"),
+                        )
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = colorScheme.primary,
+                    ),
+                ) {
+                    Text(
+                        text = "Play Store에서 설치",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 안전 권장사항 카드
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = extColors.cardBackground,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+            ) {
+                Text(
+                    text = "안전 권장사항",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = extColors.textSecondary,
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                SafetyTipRow(text = "스마트플러그로 70~80% 충전 제한 권장")
+                Spacer(modifier = Modifier.height(8.dp))
+                SafetyTipRow(text = "폰 케이스를 제거하여 방열 확보")
+                Spacer(modifier = Modifier.height(8.dp))
+                SafetyTipRow(text = "금속판 또는 타일 위에 배치")
+                Spacer(modifier = Modifier.height(8.dp))
+                SafetyTipRow(text = "월 1회 배터리 팽창 여부 점검")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Navigate to optimization guide
         Button(
-            onClick = {
-                activity?.let { act ->
-                    AdManager.showInterstitialOnce(act) {
-                        onNavigateToOptimizationGuide()
-                    }
-                } ?: onNavigateToOptimizationGuide()
-            },
+            onClick = onNavigateToOptimizationGuide,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
@@ -611,18 +662,53 @@ private fun OnboardingCompletedPhase(
             ),
         ) {
             Text(
-                text = "대시보드로 이동",
+                text = "다음",
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
             )
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 앱 닫아도 된다는 안내
+        Text(
+            text = "이 앱은 이제 닫아도 됩니다\n서버는 백그라운드에서 계속 실행됩니다",
+            fontSize = 13.sp,
+            color = extColors.textSecondary,
+            textAlign = TextAlign.Center,
+            lineHeight = 18.sp,
+        )
 
         Spacer(modifier = Modifier.height(40.dp))
     }
 }
 
 @Composable
-private fun OnboardingSshInfoRow(
+private fun SafetyTipRow(text: String) {
+    val extColors = PocketServerExtendedTheme.colors
+    val colorScheme = MaterialTheme.colorScheme
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = "\u2022",
+            fontSize = 14.sp,
+            color = extColors.textSecondary,
+            modifier = Modifier.width(16.dp),
+        )
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            color = colorScheme.onSurface,
+            lineHeight = 20.sp,
+        )
+    }
+}
+
+@Composable
+private fun SshInfoRow(
     label: String,
     value: String,
 ) {
@@ -654,7 +740,7 @@ private fun OnboardingSshInfoRow(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun OnboardingErrorPhase(
+private fun ErrorPhase(
     errorMessage: String,
     onRetry: () -> Unit,
 ) {
@@ -669,7 +755,6 @@ private fun OnboardingErrorPhase(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // Error icon
         Box(
             modifier = Modifier
                 .size(64.dp)

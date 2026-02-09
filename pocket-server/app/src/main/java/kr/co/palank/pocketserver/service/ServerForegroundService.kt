@@ -26,14 +26,17 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kr.co.palank.pocketserver.MainActivity
 import kr.co.palank.pocketserver.R
+import kr.co.palank.pocketserver.ipc.IpcServer
 import kr.co.palank.pocketserver.linux.ServerState
 import kr.co.palank.pocketserver.linux.SessionManager
+import kr.co.palank.pocketserver.monitor.NetworkMonitor
 
 class ServerForegroundService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var wifiLock: WifiManager.WifiLock
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var ipcServer: IpcServer? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -48,6 +51,7 @@ class ServerForegroundService : Service() {
             ACTION_START -> {
                 val notification = createNotification("서버 시작 중...", "PocketServer를 준비하고 있습니다.")
                 startForegroundCompat(notification)
+                startIpcServer()
 
                 sessionManager?.let { manager ->
                     serviceScope.launch {
@@ -67,6 +71,7 @@ class ServerForegroundService : Service() {
             else -> {
                 val notification = createNotification("서버 실행 중", "PocketServer가 백그라운드에서 동작하고 있습니다.")
                 startForegroundCompat(notification)
+                startIpcServer()
 
                 sessionManager?.let { manager ->
                     if (manager.isInstalled) {
@@ -93,6 +98,15 @@ class ServerForegroundService : Service() {
                 }
                 updateNotification(title, content)
             }
+        }
+    }
+
+    private fun startIpcServer() {
+        if (ipcServer != null) return
+        val manager = sessionManager ?: return
+        val network = networkMonitor ?: return
+        ipcServer = IpcServer(this, manager, network).also {
+            it.start(serviceScope)
         }
     }
 
@@ -201,6 +215,8 @@ class ServerForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        ipcServer?.stop()
+        ipcServer = null
         sessionManager?.stop()
         wakeLock?.let {
             if (it.isHeld) it.release()
@@ -223,9 +239,11 @@ class ServerForegroundService : Service() {
 
         private var _instance: ServerForegroundService? = null
         var sessionManager: SessionManager? = null
+        var networkMonitor: NetworkMonitor? = null
 
-        fun start(context: Context, sessionManager: SessionManager) {
+        fun start(context: Context, sessionManager: SessionManager, networkMonitor: NetworkMonitor? = null) {
             this.sessionManager = sessionManager
+            this.networkMonitor = networkMonitor
             val intent = Intent(context, ServerForegroundService::class.java).apply {
                 action = ACTION_START
             }

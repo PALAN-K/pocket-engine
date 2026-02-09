@@ -6,10 +6,10 @@
 ## 현재 상태 요약
 
 - **아키텍처**: 2-App (PocketMonitor + PocketServer Engine)
-- **프로젝트 진행률**: ~20% (구조 재편 완료, Firebase 설정 완료)
-- **이전 코드**: `pocket-server/` 에 Phase 1~4 코드 25개 파일 존재 (Engine으로 재활용)
+- **프로젝트 진행률**: ~35% (Phase 1 완료, Engine 빌드 성공)
+- **Engine 상태**: Phase 1 완료 — IPC 서버 + 업데이트 체크 + AdMob 제거 + 빌드 성공 (14.4MB debug APK)
 - **새로 필요**: `pocket-monitor/` 프로젝트 신규 생성
-- **다음 작업**: T1.1 Engine 프로젝트 정리 → T1.2 IPC 서버 구현
+- **다음 작업**: Phase 2 — T2.1 Monitor 프로젝트 생성
 - **GitHub**: https://github.com/naegeon/pocket-server.git (main)
 - **Firebase**: `pocket-server-palank` (Crashlytics + Hosting)
 - **서명 키스토어**: `keystore/pocketserver-release.jks` (양 앱 동일 키, gitignored)
@@ -92,38 +92,39 @@ android_linux/                     ← git root
 
 > 기존 pocket-server 코드를 Engine 앱으로 정리하고, IPC 서버를 추가한다.
 
-### T1.1 Engine 프로젝트 정리
-- [ ] MainActivity.kt 수정: 대시보드 네비게이션 제거, 셋업 마법사만 유지
-- [ ] OnboardingScreen.kt → SetupWizardScreen.kt 리네임/수정
-- [ ] DashboardScreen/ViewModel/SettingsScreen/AdManager 제거
-- [ ] build.gradle에서 AdMob SDK 의존성 제거
-- [ ] AndroidManifest.xml에서 AdMob 메타데이터 제거
-- [ ] 설치 완료 화면에 "PocketMonitor 설치 안내" 추가
+### T1.1 Engine 프로젝트 정리 ✅
+- [x] MainActivity.kt 수정: 대시보드 네비게이션 제거, 셋업 마법사만 유지
+- [x] OnboardingScreen.kt → SetupWizardScreen.kt 리네임/수정
+- [x] DashboardScreen/ViewModel/SettingsScreen/AdManager 제거
+- [x] build.gradle에서 AdMob SDK 의존성 제거
+- [x] AndroidManifest.xml에서 AdMob 메타데이터 제거
+- [x] 설치 완료 화면에 "PocketMonitor 설치 안내" + 안전 권장사항 추가
+- [x] minSdk 24 → 26 (PRD 기준으로 수정)
 
-### T1.2 IPC 서버 구현
-- [ ] `ipc/IpcServer.kt`: LocalServerSocket("pocketserver_ipc")
+### T1.2 IPC 서버 구현 ✅
+- [x] `ipc/IpcServer.kt`: LocalServerSocket("pocketserver_ipc")
   - 상태 조회 프로토콜: JSON `{"cmd":"status"}` → `{"state":"running","cpu":12,"ram":62,...}`
   - 명령 프로토콜: `{"cmd":"start"}`, `{"cmd":"stop"}`, `{"cmd":"restart"}`
-  - 토큰 인증: 최초 실행 시 랜덤 토큰 생성, SharedPreferences 저장
-- [ ] `ipc/AlertBroadcaster.kt`: 온도 초과 / 서버 크래시 시 Broadcast 발송
+  - 패키지 서명 기반 인증 (양 앱 동일 서명)
+- [x] `ipc/AlertBroadcaster.kt`: 온도 초과 / 서버 크래시 시 Broadcast 발송
   - Action: `kr.co.palank.pocketserver.ALERT`
   - Package: `kr.co.palank.pocketmonitor`
-- [ ] ServerForegroundService에서 IpcServer 시작/종료 통합
+- [x] ServerForegroundService에서 IpcServer 시작/종료 통합
 
-### T1.3 Firebase Crashlytics 통합
+### T1.3 Firebase Crashlytics 통합 ✅ (빌드 성공, 실기기 테스트 대기)
 - [x] Engine build.gradle에 Firebase Crashlytics SDK 추가
 - [x] google-services.json 설정 (Firebase 프로젝트: `pocket-server-palank`)
-- [ ] 크래시 로그 자동 수집 확인 (빌드 후 테스트 필요)
+- [ ] 크래시 로그 자동 수집 확인 (실기기 테스트 시 확인)
 
-### T1.4 자동 업데이트 체크
+### T1.4 자동 업데이트 체크 ✅
 - [x] Firebase Hosting에 version.json 배치: `firebase-hosting/public/version.json`
-- [ ] Engine 앱 실행 시 version.json 조회 → 현재 버전과 비교
-- [ ] 업데이트 가능 시 상단 배너 표시 → 탭하면 브라우저로 다운로드 페이지
+- [x] `util/UpdateChecker.kt`: 앱 실행 시 version.json 조회 → 현재 버전과 비교
+- [x] 업데이트 가능 시 상단 배너 표시 → 탭하면 브라우저로 다운로드 페이지
 
-### T1.5 빌드 검증
-- [ ] Engine APK 빌드 성공 확인 + APK 크기 측정
-- [ ] 기존 서버 기능 (PRoot → Ubuntu → Dropbear) 정상 동작 확인
-- [ ] AdMob SDK가 완전히 제거되었는지 확인
+### T1.5 빌드 검증 ✅
+- [x] Engine APK 빌드 성공 확인 (debug: 14.4MB)
+- [ ] 기존 서버 기능 (PRoot → Ubuntu → Dropbear) 정상 동작 확인 (실기기 테스트 시 확인)
+- [x] AdMob SDK가 완전히 제거되었는지 확인 (grep 검증 통과)
 
 ---
 
