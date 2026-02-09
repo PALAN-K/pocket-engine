@@ -36,6 +36,11 @@ val StatusGreenBgDark = Color(0xFF14532D)
 val StatusAmberBgDark = Color(0xFF78350F)
 val StatusRedBgDark = Color(0xFF7F1D1D)
 
+// Chart gradient fills (40% alpha)
+val ChartGreenGradient = Color(0x6622C55E)
+val ChartAmberGradient = Color(0x66F59E0B)
+val ChartRedGradient = Color(0x66EF4444)
+
 // Outline / Divider
 val LightOutline = Color(0xFFE2E8F0)
 val DarkOutline = Color(0xFF3B3B5C)

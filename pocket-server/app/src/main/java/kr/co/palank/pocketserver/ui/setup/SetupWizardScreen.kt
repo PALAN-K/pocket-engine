@@ -146,7 +146,7 @@ private fun SpecCheckPhase(
         Spacer(modifier = Modifier.height(80.dp))
 
         Text(
-            text = "PocketServer",
+            text = "PocketEngine",
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
             color = colorScheme.primary,
@@ -200,23 +200,32 @@ private fun SpecCheckPhase(
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        Text(
-            text = "기기 사양",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = extColors.textSecondary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = extColors.cardBackground),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = "기기 사양",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = extColors.textSecondary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                )
 
-        SpecRow(label = spec.androidVersion, isOk = spec.isVersionOk)
-        Spacer(modifier = Modifier.height(12.dp))
-        SpecRow(label = "RAM ${String.format("%.1f", spec.ramSizeGb)}GB", isOk = spec.isRamOk)
-        Spacer(modifier = Modifier.height(12.dp))
-        SpecRow(label = "저장공간 ${spec.storageFreeGb}GB 여유", isOk = spec.isStorageOk)
-        Spacer(modifier = Modifier.height(12.dp))
-        SpecRow(label = "${spec.arch} 프로세서", isOk = spec.isArchOk)
+                SpecRow(label = spec.androidVersion, isOk = spec.isVersionOk)
+                Spacer(modifier = Modifier.height(12.dp))
+                SpecRow(label = "RAM ${String.format("%.1f", spec.ramSizeGb)}GB", isOk = spec.isRamOk)
+                Spacer(modifier = Modifier.height(12.dp))
+                SpecRow(label = "저장공간 ${spec.storageFreeGb}GB 여유", isOk = spec.isStorageOk)
+                Spacer(modifier = Modifier.height(12.dp))
+                SpecRow(label = "${spec.arch} 프로세서", isOk = spec.isArchOk)
+            }
+        }
 
         Spacer(modifier = Modifier.height(40.dp))
     }
@@ -413,7 +422,7 @@ private fun CompletedPhase(
             colors = CardDefaults.cardColors(
                 containerColor = extColors.cardBackground,
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -526,7 +535,7 @@ private fun CompletedPhase(
             colors = CardDefaults.cardColors(
                 containerColor = extColors.cardBackground,
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Row(
                 modifier = Modifier
@@ -572,7 +581,7 @@ private fun CompletedPhase(
             colors = CardDefaults.cardColors(
                 containerColor = colorScheme.primaryContainer,
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -623,7 +632,7 @@ private fun CompletedPhase(
             colors = CardDefaults.cardColors(
                 containerColor = extColors.cardBackground,
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -787,7 +796,7 @@ private fun ErrorPhase(
             colors = CardDefaults.cardColors(
                 containerColor = extColors.statusRedBg,
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Text(
                 text = errorMessage,

@@ -26,6 +26,9 @@ data class DeviceStatus(
     val batteryLevel: Int = 0,
     val storageUsedGb: Long = 0,
     val storageTotalGb: Long = 0,
+    val isCharging: Boolean = false,
+    val chargingType: String = "",
+    val voltage: Float = 0f,
 )
 
 class DeviceMonitor(private val context: Context) {
@@ -54,9 +57,30 @@ class DeviceMonitor(private val context: Context) {
     private fun collectStatus(): DeviceStatus {
         val cpu = getCpuUsage()
         val (ramUsed, ramTotal) = getRamUsage()
-        val temp = getTemperature()
-        val battery = getBatteryLevel()
         val (storageUsed, storageTotal) = getStorageUsage()
+
+        val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val temp = (batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
+
+        val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val battery = if (level >= 0 && scale > 0) (level * 100 / scale) else 0
+
+        val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+
+        val plugged = batteryIntent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1) ?: -1
+        val chargingType = when (plugged) {
+            BatteryManager.BATTERY_PLUGGED_USB -> "USB"
+            BatteryManager.BATTERY_PLUGGED_AC -> "AC"
+            BatteryManager.BATTERY_PLUGGED_WIRELESS -> "무선"
+            else -> ""
+        }
+
+        val voltageMv = batteryIntent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0) ?: 0
+        val voltage = voltageMv / 1000f
+
         return DeviceStatus(
             cpuUsage = cpu,
             ramUsedGb = ramUsed,
@@ -65,6 +89,9 @@ class DeviceMonitor(private val context: Context) {
             batteryLevel = battery,
             storageUsedGb = storageUsed,
             storageTotalGb = storageTotal,
+            isCharging = isCharging,
+            chargingType = chargingType,
+            voltage = voltage,
         )
     }
 
@@ -97,18 +124,6 @@ class DeviceMonitor(private val context: Context) {
         val total = memInfo.totalMem.toDouble() / (1024 * 1024 * 1024)
         val avail = memInfo.availMem.toDouble() / (1024 * 1024 * 1024)
         return Pair(total - avail, total)
-    }
-
-    private fun getTemperature(): Float {
-        val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        return (intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
-    }
-
-    private fun getBatteryLevel(): Int {
-        val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-        return if (level >= 0 && scale > 0) (level * 100 / scale) else 0
     }
 
     private fun getStorageUsage(): Pair<Long, Long> {

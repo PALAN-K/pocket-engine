@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PocketMonitor 개인정보 처리방침</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fff; color: #1d1d1f; line-height: 1.7; }
+    .container { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+    .meta { font-size: 14px; color: #86868b; margin-bottom: 32px; }
+    h2 { font-size: 18px; font-weight: 600; margin-top: 32px; margin-bottom: 12px; border-bottom: 1px solid #e8e8ed; padding-bottom: 8px; }
+    h3 { font-size: 16px; font-weight: 600; margin-top: 20px; margin-bottom: 8px; }
+    p { font-size: 15px; margin-bottom: 12px; }
+    ul, ol { font-size: 15px; margin-bottom: 12px; padding-left: 24px; }
+    li { margin-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 14px; }
+    th, td { border: 1px solid #e8e8ed; padding: 8px 12px; text-align: left; }
+    th { background: #f5f5f7; font-weight: 600; }
+    a { color: #0071e3; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .lang-switch { text-align: right; margin-bottom: 16px; }
+    .lang-switch a { font-size: 14px; padding: 4px 12px; border: 1px solid #e8e8ed; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="lang-switch"><a href="privacy-en.html">English</a></div>
+
+    <h1>PocketMonitor 개인정보 처리방침</h1>
+    <p class="meta">시행일: 2026-02-09 | 최종 수정일: 2026-02-09</p>
+
+    <p>Palank(이하 "회사")는 PocketMonitor(이하 "앱") 이용자의 개인정보를 중요시하며, 「개인정보 보호법」 제30조에 따라 다음과 같이 개인정보 처리방침을 수립하여 공개합니다.</p>
+
+    <h2>1. 개인정보의 처리 목적</h2>
+    <p>회사는 다음의 목적을 위하여 개인정보를 처리합니다. 처리하고 있는 개인정보는 다음의 목적 이외의 용도로는 이용되지 않습니다.</p>
+    <ul>
+      <li><strong>앱 안정성 확보</strong>: 비정상 종료(크래시) 로그를 수집하여 앱 품질을 개선합니다.</li>
+      <li><strong>광고 제공</strong>: Google AdMob SDK를 통해 맞춤형 광고를 표시합니다.</li>
+    </ul>
+    <p>앱은 디바이스 상태 정보(CPU, RAM, 온도, 저장공간)를 모니터링하지만, 이 정보는 <strong>사용자 기기 내에서만 처리</strong>되며 외부 서버로 전송되지 않습니다.</p>
+
+    <h2>2. 처리하는 개인정보의 항목</h2>
+    <p>회사는 사용자 계정, 이름, 이메일, 전화번호 등 <strong>직접적인 개인정보를 수집하지 않습니다.</strong></p>
+    <p>다만, 앱에 포함된 제3자 SDK가 다음의 정보를 자동 수집합니다:</p>
+
+    <h3>2-1. Google AdMob (광고)</h3>
+    <table>
+      <tr><th>수집 항목</th><th>목적</th></tr>
+      <tr><td>IP 주소</td><td>대략적 위치 추정, 광고 제공</td></tr>
+      <tr><td>Android 광고 ID</td><td>맞춤형 광고, 분석</td></tr>
+      <tr><td>앱 상호작용 정보</td><td>광고 성과 측정</td></tr>
+      <tr><td>진단 정보 (앱 실행 시간, 에너지 사용량)</td><td>성능 모니터링</td></tr>
+    </table>
+
+    <h3>2-2. Firebase Crashlytics (크래시 리포팅)</h3>
+    <table>
+      <tr><th>수집 항목</th><th>목적</th></tr>
+      <tr><td>크래시 스택 트레이스</td><td>비정상 종료 원인 분석</td></tr>
+      <tr><td>기기 정보 (모델명, OS 버전, CPU 아키텍처)</td><td>크래시 환경 파악</td></tr>
+      <tr><td>Crashlytics 설치 UUID</td><td>크래시 영향 사용자 수 측정</td></tr>
+      <tr><td>앱 정보 (버전, 포그라운드/백그라운드 상태)</td><td>크래시 컨텍스트 파악</td></tr>
+    </table>
+
+    <h3>2-3. 기기 내 처리 정보 (수집하지 않음)</h3>
+    <p>다음 정보는 대시보드 표시 목적으로 기기 내에서만 처리되며, 외부로 전송되지 않습니다:</p>
+    <ul>
+      <li>CPU 사용률, RAM 사용량, 배터리 온도, 저장공간 사용량</li>
+      <li>24시간 온도 히스토리 (인메모리, 앱 종료 시 삭제)</li>
+      <li>일일/주간 리포트 내용 (로컬 알림으로만 표시)</li>
+    </ul>
+
+    <h2>3. 개인정보의 처리 및 보유 기간</h2>
+    <table>
+      <tr><th>항목</th><th>보유 기간</th><th>비고</th></tr>
+      <tr><td>AdMob 수집 정보</td><td>Google 정책에 따름</td><td><a href="https://policies.google.com/privacy">Google 개인정보처리방침</a> 참조</td></tr>
+      <tr><td>Crashlytics 크래시 로그</td><td>90일</td><td>Google Firebase 서버에 저장 후 자동 삭제</td></tr>
+      <tr><td>기기 내 모니터링 데이터</td><td>앱 실행 중에만 유지</td><td>앱 삭제 시 완전 삭제</td></tr>
+    </table>
+
+    <h2>4. 개인정보의 제3자 제공</h2>
+    <p>회사는 이용자의 개인정보를 제3자에게 직접 제공하지 않습니다. 다만, 앱에 포함된 SDK를 통해 다음 제3자에게 데이터가 전달됩니다:</p>
+    <table>
+      <tr><th>제공받는 자</th><th>목적</th><th>제공 항목</th></tr>
+      <tr><td>Google LLC (AdMob)</td><td>광고 제공 및 분석</td><td>IP 주소, 광고 ID, 앱 상호작용 정보</td></tr>
+      <tr><td>Google LLC (Crashlytics)</td><td>크래시 리포팅</td><td>크래시 로그, 기기 메타데이터</td></tr>
+    </table>
+
+    <h2>5. 개인정보의 국외 이전</h2>
+    <p>앱에 포함된 제3자 SDK를 통해 수집된 데이터는 다음과 같이 국외로 이전됩니다:</p>
+    <table>
+      <tr><th>항목</th><th>내용</th></tr>
+      <tr><td>이전받는 자</td><td>Google LLC</td></tr>
+      <tr><td>이전되는 국가</td><td>미국</td></tr>
+      <tr><td>이전 목적</td><td>광고 제공 (AdMob), 크래시 리포팅 (Crashlytics)</td></tr>
+      <tr><td>이전 항목</td><td>IP 주소, 기기 식별자, 크래시 로그, 기기 메타데이터</td></tr>
+      <tr><td>보유 기간</td><td>AdMob: Google 정책에 따름 / Crashlytics: 90일</td></tr>
+      <tr><td>이전 방법</td><td>네트워크를 통한 전송 (TLS 암호화)</td></tr>
+    </table>
+
+    <h2>6. 개인정보의 파기절차 및 파기방법</h2>
+    <ul>
+      <li><strong>기기 내 데이터</strong>: 앱 삭제(제거) 시 모든 로컬 데이터가 자동으로 삭제됩니다.</li>
+      <li><strong>AdMob 데이터</strong>: Android 설정 > Google > 광고에서 광고 ID를 재설정하거나 삭제할 수 있습니다.</li>
+      <li><strong>Crashlytics 데이터</strong>: 수집일로부터 90일 경과 후 Google 서버에서 자동 삭제됩니다.</li>
+    </ul>
+
+    <h2>7. 정보주체의 권리, 의무 및 행사방법</h2>
+    <p>이용자는 언제든지 다음의 권리를 행사할 수 있습니다:</p>
+    <ul>
+      <li>개인정보 처리에 대한 동의 철회</li>
+      <li>개인정보 열람, 정정, 삭제 요구</li>
+      <li>개인정보 처리 정지 요구</li>
+    </ul>
+    <p>권리 행사는 하단의 개인정보 보호책임자에게 이메일로 요청하시기 바랍니다.</p>
+
+    <h3>광고 맞춤화 거부 방법</h3>
+    <ul>
+      <li>Android: 설정 > Google > 광고 > 광고 맞춤설정 선택 해제</li>
+      <li>Google 광고 설정: <a href="https://www.google.com/settings/ads">https://www.google.com/settings/ads</a></li>
+    </ul>
+
+    <h2>8. 자동 수집 장치의 설치, 운영 및 거부</h2>
+    <p>Google AdMob SDK는 광고 제공 및 분석을 위해 쿠키 또는 유사한 기술을 사용할 수 있습니다.</p>
+    <ul>
+      <li>Android 광고 ID는 Android 설정에서 재설정하거나 삭제할 수 있습니다.</li>
+      <li>맞춤형 광고를 원하지 않는 경우, 위 7항의 광고 맞춤화 거부 방법을 참조하세요.</li>
+    </ul>
+
+    <h2>9. 행태정보의 수집, 이용 및 거부</h2>
+    <p>Google AdMob은 광고 타겟팅을 위해 앱 사용 패턴 등 행태정보를 수집할 수 있습니다.</p>
+    <table>
+      <tr><th>항목</th><th>내용</th></tr>
+      <tr><td>수집하는 행태정보</td><td>앱 상호작용 정보, 광고 클릭/노출 데이터</td></tr>
+      <tr><td>수집 방법</td><td>AdMob SDK를 통한 자동 수집</td></tr>
+      <tr><td>수집 목적</td><td>관심 기반 맞춤형 광고 제공</td></tr>
+      <tr><td>거부 방법</td><td>Android 설정 > Google > 광고 > 광고 맞춤설정 선택 해제</td></tr>
+    </table>
+
+    <h2>10. 14세 미만 아동의 개인정보 처리</h2>
+    <p>이 앱은 14세 미만 아동을 대상으로 하지 않습니다. 회사는 14세 미만 아동의 개인정보를 의도적으로 수집하지 않습니다. 14세 미만 아동의 개인정보가 수집된 것을 인지할 경우, 즉시 해당 정보를 삭제하겠습니다.</p>
+
+    <h2>11. 개인정보의 안전성 확보조치</h2>
+    <ul>
+      <li>제3자 SDK (AdMob, Crashlytics)의 데이터 전송은 TLS 암호화를 통해 보호됩니다.</li>
+      <li>기기 내 모니터링 데이터는 앱 전용 메모리에서만 처리되며, 외부 접근이 불가합니다.</li>
+      <li>회사는 별도의 서버를 운영하지 않으므로, 서버 측 개인정보 유출 위험이 없습니다.</li>
+    </ul>
+
+    <h2>12. 개인정보 처리 위탁</h2>
+    <table>
+      <tr><th>수탁자</th><th>위탁 업무</th></tr>
+      <tr><td>Google LLC</td><td>광고 제공 및 성과 측정 (AdMob)</td></tr>
+      <tr><td>Google LLC</td><td>앱 크래시 수집 및 분석 (Firebase Crashlytics)</td></tr>
+    </table>
+
+    <h2>13. 개인정보 보호책임자</h2>
+    <table>
+      <tr><th>항목</th><th>내용</th></tr>
+      <tr><td>성명</td><td>Palank 개인정보 보호팀</td></tr>
+      <tr><td>연락처</td><td>privacy@palank.co.kr</td></tr>
+    </table>
+    <p>개인정보 침해에 대한 신고나 상담이 필요한 경우 아래 기관에 문의하실 수 있습니다:</p>
+    <ul>
+      <li>개인정보보호위원회: <a href="https://www.pipc.go.kr">www.pipc.go.kr</a> (국번없이 1833-6972)</li>
+      <li>한국인터넷진흥원 개인정보침해신고센터: <a href="https://privacy.kisa.or.kr">privacy.kisa.or.kr</a> (국번없이 118)</li>
+      <li>대검찰청 사이버수사과: <a href="https://www.spo.go.kr">www.spo.go.kr</a> (국번없이 1301)</li>
+      <li>경찰청 사이버수사국: <a href="https://ecrm.police.go.kr">ecrm.police.go.kr</a> (국번없이 182)</li>
+    </ul>
+
+    <h2>14. 개인정보 처리방침의 변경</h2>
+    <p>이 개인정보 처리방침은 법령, 정책 또는 앱 기능 변경에 따라 수정될 수 있습니다. 변경 시 앱 내 공지 또는 이 페이지의 최종 수정일 갱신을 통해 알려드립니다.</p>
+
+    <h2>참고 링크</h2>
+    <ul>
+      <li><a href="https://policies.google.com/privacy">Google 개인정보처리방침</a></li>
+      <li><a href="https://firebase.google.com/support/privacy">Firebase 개인정보 및 보안</a></li>
+      <li><a href="https://www.google.com/settings/ads">Google 광고 설정</a></li>
+    </ul>
+  </div>
+</body>
+</html>

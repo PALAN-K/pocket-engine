@@ -1,9 +1,7 @@
 package kr.co.palank.pocketmonitor.ui.settings
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,16 +15,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,7 +36,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kr.co.palank.pocketmonitor.ui.theme.PocketMonitorExtendedTheme
+import kr.co.palank.pocketmonitor.util.SettingsDataStore
+import kr.co.palank.pocketmonitor.util.SettingsKeys
 
 @Composable
 fun SettingsScreen(
@@ -42,9 +47,21 @@ fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    var dailyReportEnabled by remember { mutableStateOf(true) }
-    var tempAlertEnabled by remember { mutableStateOf(true) }
-    var weeklyReportEnabled by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    val settingsDataStore = remember { SettingsDataStore(context) }
+
+    val dailyReportEnabled by settingsDataStore.getBoolean(SettingsKeys.DAILY_REPORT)
+        .collectAsState(initial = true)
+    val tempAlertEnabled by settingsDataStore.getBoolean(SettingsKeys.TEMP_ALERT)
+        .collectAsState(initial = true)
+    val weeklyReportEnabled by settingsDataStore.getBoolean(SettingsKeys.WEEKLY_REPORT)
+        .collectAsState(initial = true)
+
+    var showLicenseDialog by remember { mutableStateOf(false) }
+
+    if (showLicenseDialog) {
+        LicenseDialog(onDismiss = { showLicenseDialog = false })
+    }
 
     Column(
         modifier = Modifier
@@ -80,17 +97,23 @@ fun SettingsScreen(
         SettingToggle(
             title = "일일 리포트",
             checked = dailyReportEnabled,
-            onCheckedChange = { dailyReportEnabled = it },
+            onCheckedChange = {
+                scope.launch { settingsDataStore.setBoolean(SettingsKeys.DAILY_REPORT, it) }
+            },
         )
         SettingToggle(
             title = "온도 경고 알림",
             checked = tempAlertEnabled,
-            onCheckedChange = { tempAlertEnabled = it },
+            onCheckedChange = {
+                scope.launch { settingsDataStore.setBoolean(SettingsKeys.TEMP_ALERT, it) }
+            },
         )
         SettingToggle(
             title = "주간 요약",
             checked = weeklyReportEnabled,
-            onCheckedChange = { weeklyReportEnabled = it },
+            onCheckedChange = {
+                scope.launch { settingsDataStore.setBoolean(SettingsKeys.WEEKLY_REPORT, it) }
+            },
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -98,8 +121,8 @@ fun SettingsScreen(
         Divider(color = MaterialTheme.colorScheme.outline)
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Server connection section
-        SectionTitle("서버 연동")
+        // Extension features section
+        SectionTitle("확장 기능")
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(
@@ -109,13 +132,13 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "연결 상태",
+                text = "확장 도구",
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = if (engineConnected) "연결됨" else "미연결",
+                text = if (engineConnected) "연결됨" else "사용 가능",
                 fontSize = 15.sp,
                 color = if (engineConnected) {
                     PocketMonitorExtendedTheme.colors.statusGreen
@@ -127,19 +150,33 @@ fun SettingsScreen(
         }
 
         if (!engineConnected) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ENGINE_DOWNLOAD_URL))
-                        context.startActivity(intent)
-                    }
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = 8.dp),
             ) {
                 Text(
-                    text = "서버 엔진 설치 안내",
+                    text = "PocketEngine 확장 도구",
                     fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "디바이스를 더 다양하게 활용할 수 있는\n확장 도구를 확인해보세요",
+                    fontSize = 13.sp,
+                    color = PocketMonitorExtendedTheme.colors.textSecondary,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "자세히 보기",
+                    fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ENGINE_DOWNLOAD_URL))
+                        context.startActivity(intent)
+                    },
                 )
             }
         }
@@ -157,12 +194,64 @@ fun SettingsScreen(
         InfoRow(
             label = "오픈소스 라이선스",
             value = "",
+            onClick = { showLicenseDialog = true },
+        )
+        InfoRow(
+            label = "개인정보 처리방침",
+            value = "",
             onClick = {
-                Toast.makeText(context, "오픈소스 라이선스", Toast.LENGTH_SHORT).show()
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL))
+                context.startActivity(intent)
             },
         )
 
         Spacer(modifier = Modifier.height(40.dp))
+    }
+}
+
+@Composable
+private fun LicenseDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "오픈소스 라이선스",
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column {
+                LicenseItem("Jetpack Compose", "Apache License 2.0")
+                LicenseItem("Material Design 3", "Apache License 2.0")
+                LicenseItem("Google AdMob SDK", "Google APIs Terms of Service")
+                LicenseItem("AndroidX WorkManager", "Apache License 2.0")
+                LicenseItem("AndroidX DataStore", "Apache License 2.0")
+                LicenseItem("AndroidX Lifecycle", "Apache License 2.0")
+                LicenseItem("Kotlin Coroutines", "Apache License 2.0")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("닫기")
+            }
+        },
+    )
+}
+
+@Composable
+private fun LicenseItem(name: String, license: String) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(
+            text = name,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = license,
+            fontSize = 12.sp,
+            color = PocketMonitorExtendedTheme.colors.textSecondary,
+        )
     }
 }
 
@@ -229,3 +318,4 @@ private fun InfoRow(
 }
 
 private const val ENGINE_DOWNLOAD_URL = "https://pocket-server-palank.web.app"
+private const val PRIVACY_POLICY_URL = "https://pocket-server-palank.web.app/privacy-ko.html"

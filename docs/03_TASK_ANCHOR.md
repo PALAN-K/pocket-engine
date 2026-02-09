@@ -1,18 +1,32 @@
 # PocketServer — Development Task Anchor
 
 > 다음 세션 시작 시 이 파일을 읽고 작업을 이어갈 것.
-> 최종 갱신: 2026-02-09 (2-App 아키텍처 피벗)
+> 최종 갱신: 2026-02-09 (Phase 3.5 UI 개선 + 포지셔닝 완료)
 
 ## 현재 상태 요약
 
-- **아키텍처**: 2-App (PocketMonitor + PocketServer Engine)
-- **프로젝트 진행률**: ~65% (Phase 1 + Phase 2 완료)
-- **Engine 상태**: Phase 1 완료 — IPC 서버 + 업데이트 체크 + AdMob 제거 + 빌드 성공 (14.4MB debug APK)
-- **Monitor 상태**: Phase 2 완료 — 대시보드 + IPC + 알림 + AdMob + 빌드 성공 (16MB debug APK)
-- **다음 작업**: Phase 3 — T3.1 Firebase Hosting 배포 + Phase 4 통합 테스트
+- **아키텍처**: 2-App (PocketMonitor + PocketEngine)
+- **프로젝트 진행률**: ~90% (Phase 1 + Phase 2 + Phase 3 + Phase 3.5 완료)
+- **Engine 상태**: Phase 1 완료 + UI 통일 — "PocketEngine"으로 리네이밍, 카드 디자인 통일, 방패+톱니바퀴 아이콘
+- **Monitor 상태**: Phase 2 완료 + UI 개선 — Apple 스타일 대시보드, 건강 점수 게이지, 배터리 상세 카드, 히스토리 차트 탭, DataStore 설정 영속화, 방패+하트비트 아이콘
+- **배포 상태**: Phase 3 완료 — Firebase Hosting + Cloudflare R2 배포 완료
+- **포지셔닝**: "무인 디바이스 가디언" — 24/7 가동 디바이스 헬스 관리 앱 (CCTV, 베이비모니터, 스마트홈 허브, 서버 등)
+- **다음 작업**: Phase 4 — 실기기 통합 테스트 + Play Store 등록
 - **GitHub**: https://github.com/naegeon/pocket-server.git (main)
 - **Firebase**: `pocket-server-palank` (Crashlytics + Hosting)
+- **Cloudflare R2**: `pocketserver-apk` 버킷 (Engine APK 호스팅)
 - **서명 키스토어**: `keystore/pocketserver-release.jks` (양 앱 동일 키, gitignored)
+
+## 배포 URL
+
+| 리소스 | URL |
+|--------|-----|
+| Engine 다운로드 페이지 | https://pocket-server-palank.web.app |
+| Engine APK (R2) | https://pub-832ccadf097e4bf687650db1e57df66b.r2.dev/pocketserver-engine.apk |
+| version.json (Hosting) | https://pocket-server-palank.web.app/version.json |
+| version.json (R2) | https://pub-832ccadf097e4bf687650db1e57df66b.r2.dev/version.json |
+| 개인정보 처리방침 (한국어) | https://pocket-server-palank.web.app/privacy-ko.html |
+| 개인정보 처리방침 (English) | https://pocket-server-palank.web.app/privacy-en.html |
 
 ## 아키텍처 개요
 
@@ -39,9 +53,9 @@ android_linux/                     ← git root
 ├── pocket-server/                 ← Engine 앱 (기존 코드 재활용 + IPC 추가)
 │   ├── app/google-services.json   ← Firebase 설정 (커밋됨)
 │   └── app/src/main/java/kr/co/palank/pocketserver/
-├── pocket-monitor/                ← Monitor 앱 (신규 생성 예정)
+├── pocket-monitor/                ← Monitor 앱 (Phase 2 완료)
 │   └── app/src/main/java/kr/co/palank/pocketmonitor/
-├── firebase-hosting/public/       ← Engine APK 다운로드 페이지
+├── firebase-hosting/public/       ← 다운로드 페이지 + 개인정보 처리방침
 ├── keystore/                      ← 서명 키스토어 (gitignored)
 ├── docs/
 │   ├── 01_BRAINSTORMING.md
@@ -187,40 +201,107 @@ android_linux/                     ← git root
 ### T2.7 빌드 및 Play Store 준비
 - [x] Monitor APK 빌드 성공 확인 (debug: 16MB)
 - [ ] Play Store 리스팅 준비 (스크린샷, 설명, 카테고리)
-- [ ] 개인정보 처리방침 작성
+- [x] 개인정보 처리방침 작성 (한국어 + 영어, Firebase Hosting 배포 완료)
 
 ---
 
-## Phase 3: Firebase Hosting — "Engine 배포"
+## Phase 3: Firebase Hosting + Cloudflare R2 — "Engine 배포" ✅
 
-### T3.1 Firebase 프로젝트 설정
+### T3.1 Firebase 프로젝트 설정 ✅
 - [x] Firebase 프로젝트 생성 (`pocket-server-palank`)
 - [x] Firebase Hosting 설정 (firebase.json + .firebaserc)
-- [ ] 커스텀 도메인 설정 (선택)
-- [ ] `firebase deploy --only hosting` 으로 첫 배포
+- [ ] 커스텀 도메인 설정 (선택, 미진행)
+- [x] `firebase deploy --only hosting` 배포 완료
 
-### T3.2 배포 웹페이지
+### T3.2 배포 웹페이지 ✅
 - [x] Engine APK 다운로드 페이지 HTML (`firebase-hosting/public/index.html`)
-  - 다운로드 버튼
+  - 다운로드 버튼 → Cloudflare R2 APK URL로 연결
   - 설치 가이드 (출처를 알 수 없는 앱 허용 방법)
   - FAQ
-- [ ] Engine APK 업로드 (`firebase-hosting/public/pocketserver-engine.apk`)
-- [ ] 배포 URL 확정 (`pocket-server-palank.web.app`)
+- [x] Engine release APK 빌드 (11MB) + Cloudflare R2 업로드
+  - Firebase Spark 무료 플랜에서 APK(실행 파일) 업로드 불가 → Cloudflare R2로 대체
+  - R2 버킷: `pocketserver-apk` (퍼블릭 접근 활성화)
+  - APK URL: `https://pub-832ccadf097e4bf687650db1e57df66b.r2.dev/pocketserver-engine.apk`
+- [x] 배포 URL 확정: `pocket-server-palank.web.app` (다운로드 페이지) + R2 (APK)
+- [x] 개인정보 처리방침 배포 (privacy-ko.html + privacy-en.html)
+
+---
+
+## Phase 3.5: UI 개선 + Play Store 포지셔닝 ✅
+
+> "무인 디바이스 가디언" 포지셔닝 적용 + Apple 스타일 UI 전면 개선
+
+### T3.5.1 Monitor 대시보드 UI 개선 ✅
+- [x] 디바이스 건강 점수 게이지 (0-100, 270° 원형 아크, animateFloatAsState)
+  - 등급: 우수(90+)/양호(70+)/주의(50+)/위험(50 미만)
+  - 가중치: 온도 40%, CPU 20%, RAM 20%, 저장공간 10%, 배터리 10%
+- [x] 메트릭 카드에 Material 아이콘 + 원형 프로그레스 링 (CPU/메모리)
+- [x] 카드 좌측 상태색 accent bar (4dp, 초록/노랑/빨강)
+- [x] 배터리 상세 카드 (잔량, 전압, 충전상태, 충전타입, 온도)
+- [x] 히스토리 차트 탭 전환 (온도/CPU/메모리 FilterChip)
+- [x] 차트 그라데이션 fill + 경고선 (45°C/50°C 점선)
+- [x] DashboardHeader에 상태 dot (초록/노랑/빨강)
+- [x] DeviceMonitor에 isCharging, chargingType, voltage 필드 추가
+
+### T3.5.2 설정 화면 개선 ✅
+- [x] DataStore 영속화 연동 (SettingsDataStore.kt 신규 생성)
+- [x] 알림 토글 → DataStore에서 Flow로 읽기/쓰기 (앱 재시작 후 유지)
+- [x] 오픈소스 라이선스 AlertDialog (7개 라이브러리 목록)
+- [x] 개인정보 처리방침 링크 (브라우저로 열기)
+- [x] "서버 연동" → "확장 기능"으로 변경 (중립적 문구)
+- [x] Engine 미연결 시: "PocketEngine 확장 도구" + "자세히 보기" (대시보드에서 제거)
+
+### T3.5.3 Play Store 포지셔닝 ✅
+- [x] 대시보드에서 Engine 미연동 카드 완전 제거 → 순수 디바이스 모니터링 앱으로 보임
+- [x] Engine 안내는 설정 > 확장 기능에만 배치
+- [x] "무인 디바이스 가디언" 콘셉트: CCTV, 베이비모니터, 스마트홈 허브, 서버 등 24/7 가동 디바이스 대상
+
+### T3.5.4 디자인 통일 ✅
+- [x] Monitor 앱 아이콘: 방패 + 하트비트 펄스 (파란 배경)
+- [x] Engine 앱 아이콘: 방패 + 톱니바퀴 (파란 배경, 동일 모티프)
+- [x] Engine "PocketServer" → "PocketEngine" 리네이밍
+- [x] Engine 사양 검사 Row를 Card로 래핑 (16dp radius, 2dp elevation)
+- [x] Engine 모든 카드 elevation 0dp → 2dp (Monitor와 통일)
+
+### T3.5.5 빌드 검증 ✅
+- [x] Monitor APK 빌드 성공 + 에뮬레이터 정상 동작 확인
+- [x] Engine APK 빌드 성공 + 에뮬레이터 정상 동작 확인
+- [x] 스크린샷 확인: 대시보드, 설정, Engine 셋업 마법사
 
 ---
 
 ## Phase 4: 통합 테스트 + 출시
 
-### T4.1 통합 테스트
+### T4.1 실기기 통합 테스트
 - [ ] Engine 설치 → Monitor 자동 감지 → IPC 통신 확인
 - [ ] 푸시 알림 (일일 리포트, 온도 경고) 동작 확인
-- [ ] 광고 노출 확인 (배너 + 전면 진입/이탈)
-- [ ] 실기기 5~10대 테스트
+- [ ] 광고 노출 확인 (배너 + App Open Ad)
+- [ ] 설정 토글 영속화 확인 (변경 → 앱 종료 → 재실행 → 유지)
+- [ ] 실기기 3~5대 테스트 (구형 Galaxy, Pixel 등)
+- [ ] Engine 서버 설치 → Dropbear SSH 접속 확인
 
-### T4.2 출시
-- [ ] Monitor → Play Store 등록
-- [ ] Engine → Firebase Hosting 공개
-- [ ] 실제 AdMob ID 교체 (테스트 → 프로덕션)
+### T4.2 Play Store 등록 준비
+- [ ] Play Store 리스팅 작성
+  - [ ] 앱 이름: "PocketMonitor - 디바이스 헬스 가디언" (가칭)
+  - [ ] 카테고리: 도구 (Tools)
+  - [ ] 짧은 설명 (80자)
+  - [ ] 긴 설명 (4000자)
+  - [ ] 스크린샷 준비 (폰 + 7인치 태블릿)
+  - [ ] 기능 그래픽 (1024x500)
+  - [ ] 앱 아이콘 (512x512 PNG)
+- [ ] 개인정보 처리방침 URL 등록: `https://pocket-server-palank.web.app/privacy-ko.html`
+- [ ] 데이터 안전 섹션 작성 (수집 데이터, 사용 목적)
+- [ ] 콘텐츠 등급 설문 작성
+
+### T4.3 출시
+- [ ] 실제 AdMob 광고 단위 ID 생성 + 교체 (테스트 → 프로덕션)
+  - [ ] Monitor: AdManager.kt 내 배너 + App Open Ad ID
+  - [ ] Monitor: AndroidManifest.xml 내 APPLICATION_ID
+- [ ] Release APK 빌드 (서명 키스토어 사용)
+  - [ ] Monitor release APK
+  - [ ] Engine release APK (Cloudflare R2 재업로드)
+- [ ] Play Store 제출 (내부 테스트 → 비공개 테스트 → 프로덕션)
+- [ ] Firebase Hosting 재배포 (Engine 다운로드 페이지 최신화)
 
 ---
 
