@@ -57,8 +57,9 @@ IPC 프로토콜 호환성과 사용자 혼란 방지를 위한 규칙입니다.
 ### 현재 버전
 
 ```
-Engine:  versionCode=1, versionName="1.0"
-Monitor: versionCode=1, versionName="1.0"
+Engine:  versionCode=1, versionName="1.0.0"
+Monitor: versionCode=1, versionName="1.0.0"
+version.json: "1.0.0"
 ```
 
 ---

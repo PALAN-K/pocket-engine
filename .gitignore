@@ -55,6 +55,13 @@ node_modules/
 # Test artifacts
 test-screenshots/
 
+# Temp/debug scripts
+fix.js
+write_im.js
+out_lines.json
+src_lines.json
+transform_state.json
+
 # OS
 Thumbs.db
 Desktop.ini

@@ -36,7 +36,11 @@ data class DebPackage(
 
 class InstallManager(private val context: Context) {
 
-    private val _state = MutableStateFlow<InstallState>(InstallState.Idle)
+    private val _state = MutableStateFlow<InstallState>(
+        if (context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_INSTALLED, false)) InstallState.Completed
+        else InstallState.Idle
+    )
     val state: StateFlow<InstallState> = _state
 
     private val prootManager = ProotManager(context)
@@ -345,66 +349,125 @@ class InstallManager(private val context: Context) {
     }
 
     /**
-     * Python3 + ctypes + libzstd.so를 사용하는 zstd 추출 스크립트를 rootfs에 준비
+     * Python3 + ctypes + libzstd.so 스트리밍 API를 사용하는 zstd 추출 스크립트를 rootfs에 준비
+     * ZSTD_decompressStream 사용 — content-size 헤더 없는 프레임도 처리 가능
      */
     private fun ensureZstExtractScript(rootfsDir: File) {
         val tmpDir = File(rootfsDir, "tmp")
         tmpDir.mkdirs()
         File(tmpDir, "zst_extract.py").writeText("""
-import ctypes, tarfile, io, sys, os
+import ctypes, tarfile, io, sys
 
 lib = ctypes.CDLL('libzstd.so.1')
-lib.ZSTD_getFrameContentSize.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-lib.ZSTD_getFrameContentSize.restype = ctypes.c_ulonglong
-lib.ZSTD_decompress.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t]
-lib.ZSTD_decompress.restype = ctypes.c_size_t
+
+lib.ZSTD_createDStream.restype = ctypes.c_void_p
+lib.ZSTD_freeDStream.argtypes = [ctypes.c_void_p]
+lib.ZSTD_initDStream.argtypes = [ctypes.c_void_p]
+lib.ZSTD_initDStream.restype = ctypes.c_size_t
+lib.ZSTD_decompressStream.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+lib.ZSTD_decompressStream.restype = ctypes.c_size_t
 lib.ZSTD_isError.argtypes = [ctypes.c_size_t]
 lib.ZSTD_isError.restype = ctypes.c_uint
+lib.ZSTD_DStreamOutSize.restype = ctypes.c_size_t
+
+class ZSTD_inBuffer(ctypes.Structure):
+    _fields_ = [("src", ctypes.c_void_p), ("size", ctypes.c_size_t), ("pos", ctypes.c_size_t)]
+
+class ZSTD_outBuffer(ctypes.Structure):
+    _fields_ = [("dst", ctypes.c_void_p), ("size", ctypes.c_size_t), ("pos", ctypes.c_size_t)]
 
 src_path = sys.argv[1]
 with open(src_path, 'rb') as f:
-    src = f.read()
+    compressed = f.read()
 
-buf = ctypes.create_string_buffer(src)
-dst_size = lib.ZSTD_getFrameContentSize(buf, len(src))
-if dst_size >= 0xFFFFFFFFFFFFFFFE:
-    print('ERROR: cannot determine decompressed size', file=sys.stderr)
+print('DEBUG: file size = {} bytes, magic = {}'.format(
+    len(compressed), compressed[:4].hex() if len(compressed) >= 4 else 'too short'), file=sys.stderr)
+
+dstream = lib.ZSTD_createDStream()
+ret = lib.ZSTD_initDStream(dstream)
+if lib.ZSTD_isError(ret):
+    print('ERROR: ZSTD_initDStream failed', file=sys.stderr)
     sys.exit(1)
 
-dst = ctypes.create_string_buffer(int(dst_size))
-result = lib.ZSTD_decompress(dst, int(dst_size), buf, len(src))
-if lib.ZSTD_isError(result):
-    print('ERROR: zstd decompression failed', file=sys.stderr)
-    sys.exit(1)
+out_size = lib.ZSTD_DStreamOutSize()
+out_buf_data = ctypes.create_string_buffer(out_size)
 
-with tarfile.open(fileobj=io.BytesIO(dst.raw[:result])) as tf:
+in_buf_data = ctypes.create_string_buffer(compressed)
+in_buf = ZSTD_inBuffer(ctypes.cast(in_buf_data, ctypes.c_void_p), len(compressed), 0)
+
+result_chunks = []
+while in_buf.pos < in_buf.size:
+    out_buf = ZSTD_outBuffer(ctypes.cast(out_buf_data, ctypes.c_void_p), out_size, 0)
+    ret = lib.ZSTD_decompressStream(dstream, ctypes.byref(out_buf), ctypes.byref(in_buf))
+    if lib.ZSTD_isError(ret):
+        lib.ZSTD_freeDStream(dstream)
+        print('ERROR: ZSTD_decompressStream failed (ret={})'.format(ret), file=sys.stderr)
+        sys.exit(1)
+    if out_buf.pos > 0:
+        result_chunks.append(ctypes.string_at(out_buf.dst, out_buf.pos))
+
+lib.ZSTD_freeDStream(dstream)
+decompressed = b''.join(result_chunks)
+print('DEBUG: decompressed {} -> {} bytes'.format(len(compressed), len(decompressed)), file=sys.stderr)
+
+with tarfile.open(fileobj=io.BytesIO(decompressed)) as tf:
     tf.extractall('/')
 
-print('OK: {} -> {} bytes'.format(len(src), result))
+print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
 """.trimIndent())
-        Log.i(TAG, "zst_extract.py written to rootfs /tmp")
+        Log.i(TAG, "zst_extract.py (streaming API) written to rootfs /tmp")
     }
 
     /**
-     * data.tar.zst를 rootfs /tmp에 복사 후 PRoot+Python3으로 디코딩+추출
-     * Python3는 ctypes로 rootfs의 libzstd.so.1을 직접 호출
+     * data.tar.zst를 rootfs에 추출 — 3단계 폴백:
+     * 1. tar --zstd -xf (가장 간단, tar에 zstd 지원 내장 시)
+     * 2. zstdcat | tar (zstd CLI 바이너리 존재 시)
+     * 3. Python3 스트리밍 zstd (ctypes + libzstd.so, 최후 수단)
      */
     private suspend fun extractZstViaProot(dataTarFile: File, rootfsDir: File) {
         val tmpDir = File(rootfsDir, "tmp")
         val tmpFile = File(tmpDir, dataTarFile.name)
         dataTarFile.copyTo(tmpFile, overwrite = true)
 
-        val result = prootManager.exec("/bin/sh", "-c",
-            "python3 /tmp/zst_extract.py /tmp/${dataTarFile.name}"
+        val zstPath = "/tmp/${dataTarFile.name}"
+
+        // Strategy 2a: tar --zstd
+        Log.d(TAG, "zstd Strategy 2a: tar --zstd")
+        val tarZstResult = prootManager.exec("/bin/sh", "-c",
+            "tar --zstd -xf $zstPath -C / 2>&1"
+        )
+        if (tarZstResult.isSuccess) {
+            tmpFile.delete()
+            Log.i(TAG, "zstd extracted via tar --zstd (Strategy 2a)")
+            return
+        }
+        Log.w(TAG, "tar --zstd failed (code=${tarZstResult.exitCode}): ${tarZstResult.output.takeLast(200)}")
+
+        // Strategy 2b: zstdcat | tar
+        Log.d(TAG, "zstd Strategy 2b: zstdcat | tar")
+        val zstdcatResult = prootManager.exec("/bin/sh", "-c",
+            "zstdcat $zstPath | tar -xf - -C / 2>&1"
+        )
+        if (zstdcatResult.isSuccess) {
+            tmpFile.delete()
+            Log.i(TAG, "zstd extracted via zstdcat | tar (Strategy 2b)")
+            return
+        }
+        Log.w(TAG, "zstdcat | tar failed (code=${zstdcatResult.exitCode}): ${zstdcatResult.output.takeLast(200)}")
+
+        // Strategy 2c: Python3 streaming zstd (ctypes + libzstd.so)
+        Log.d(TAG, "zstd Strategy 2c: Python3 streaming zstd")
+        val pythonResult = prootManager.exec("/bin/sh", "-c",
+            "python3 /tmp/zst_extract.py $zstPath 2>&1"
         )
 
         tmpFile.delete()
 
-        if (!result.isSuccess) {
-            throw RuntimeException("zstd 추출 실패 (Python): ${result.output.takeLast(300)}")
+        if (!pythonResult.isSuccess) {
+            throw RuntimeException("zstd 추출 실패 (모든 전략 실패): ${pythonResult.output.takeLast(300)}")
         }
 
-        Log.i(TAG, "zstd extracted via PRoot+Python: ${result.output.takeLast(100)}")
+        Log.i(TAG, "zstd extracted via Python3 streaming (Strategy 2c): ${pythonResult.output.takeLast(100)}")
     }
 
     private fun downloadDebPackage(deb: DebPackage, cacheDir: File): File {
@@ -613,7 +676,7 @@ print('OK: {} -> {} bytes'.format(len(src), result))
 
         // Dropbear .deb packages — Java-side extraction (Strategy 2)
         // Noble (24.04) primary + Jammy (22.04) fallback
-        // data.tar.zst는 aircompressor 순수 Java zstd 디코더로 처리
+        // data.tar.zst는 PRoot 내 tar --zstd / zstdcat / Python3 streaming zstd로 처리
         // URL base: ports.ubuntu.com/ubuntu-ports/pool/ (arm64 아카이브 경로)
         private const val PORTS_BASE = "https://ports.ubuntu.com/ubuntu-ports/pool"
 

@@ -1,7 +1,7 @@
 # Dropbear 설치 디버깅 가이드
 
 > 최종 갱신: 2026-02-10
-> 상태: Strategy 2 (Java .deb extraction) — Python zstd 디코딩 실패, 디버깅 필요
+> 상태: Strategy 2 수정 완료 — 3단계 zstd 폴백 (tar --zstd → zstdcat | tar → Python streaming), 실기기 테스트 필요
 > 파일: `pocket-server/app/src/main/java/kr/co/palank/pocketserver/linux/InstallManager.kt`
 
 ---
@@ -16,16 +16,28 @@ Step 2: rootfs 다운로드 (80MB, ~30초)                    ✅ 동작
 Step 3: rootfs 압축 해제 (~35초)                         ✅ 동작
 Step 4: 시스템 설정 (DNS, locale, timezone, APT, user)   ✅ 동작
 Step 5: 스왑 메모리 설정 (2GB, ~9초)                     ✅ 동작
-Step 6: Dropbear SSH 설치                                ❌ 실패 중
-  ├─ Strategy 1: apt-get install dropbear                ❌ dpkg ENOSYS (Samsung)
-  └─ Strategy 2: Java .deb 추출 → PRoot+Python zstd     ❌ zstd 디코딩 실패
-Step 7: 설치 검증                                        (미도달)
+Step 6: Dropbear SSH 설치                                🔧 수정됨, 테스트 필요
+  ├─ Strategy 1: apt-get install dropbear                ❌ dpkg ENOSYS (Samsung) → 폴백
+  └─ Strategy 2: Java .deb 추출 + zstd 3단계 폴백       🔧 수정됨
+      ├─ 2a: tar --zstd -xf (PRoot)                     ⬜ 테스트 필요
+      ├─ 2b: zstdcat | tar (PRoot)                      ⬜ 테스트 필요
+      └─ 2c: Python3 streaming zstd (ctypes)            🔧 스트리밍 API로 교체
+Step 7: 설치 검증                                        ⬜ 테스트 필요
 ```
 
-### 핵심 문제
+### 핵심 문제 (수정됨)
 
 Ubuntu 24.04 (Noble) 의 .deb 패키지들은 `data.tar.zst` (Zstandard 압축)를 사용한다.
-Android 환경에서 zstd를 디코딩할 방법을 아직 찾지 못했다.
+기존 Python 스크립트가 `ZSTD_getFrameContentSize()` (단발 API)를 사용하여 content-size 없는 프레임에서 실패.
+
+### 적용된 수정
+
+extractZstViaProot()를 3단계 폴백으로 변경:
+1. `tar --zstd -xf` (PRoot 내 tar가 zstd 지원 시 가장 간단)
+2. `zstdcat | tar` (zstd CLI 존재 시)
+3. Python3 스트리밍 zstd (`ZSTD_decompressStream` API — content-size 불필요)
+
+aircompressor 의존성 제거 (Android 미호환, 사용하지 않음).
 
 ---
 
@@ -365,18 +377,32 @@ tar --zstd -xf /tmp/data.tar.zst -C /
 
 ---
 
-## 9. 다음 세션 작업 순서 (권장)
+## 9. 해결 완료 (2026-02-10)
 
-```
-1. 이 문서 읽기
-2. rootfs에 zstd/zstdcat/tar --zstd 지원 여부 확인 (ADB로)
-   → 있으면: Python 스크립트 대신 tar --zstd 또는 zstdcat | tar 사용 (가장 간단)
-   → 없으면: 방안 A (스트리밍 Python) 또는 방안 B (Jammy xz 패키지) 시도
-3. InstallManager.kt 수정
-4. 빌드 (gradlew.bat assembleDebug)
-5. 클린 설치 테스트 (pm clear → install → logcat)
-6. 성공 시: 전체 파이프라인 검증 (SSH 접속까지)
-```
+### 적용된 수정
+
+1. `extractZstViaProot()` → 3단계 폴백:
+   - **2a: `tar --zstd -xf`** (PRoot 내 tar가 zstd 지원 시)
+   - **2b: `zstdcat | tar`** (zstd CLI 바이너리 존재 시)
+   - **2c: Python3 스트리밍 zstd** (`ZSTD_decompressStream` API)
+
+2. `ensureZstExtractScript()` — `ZSTD_getFrameContentSize` → `ZSTD_decompressStream` 스트리밍 API로 교체
+
+3. `aircompressor` 의존성 제거 (Android 미호환)
+
+### 실기기 테스트 결과 (Galaxy S8, Android 9)
+
+- Strategy 1 (apt-get): ❌ dpkg ENOSYS → 예상대로 실패
+- Strategy 2a (tar --zstd): ✅ 성공 — rootfs의 tar가 zstd를 지원함
+- 전체 파이프라인: ✅ Step 1~7 모두 통과
+- Dropbear SSH 설치 + 설정 완료
+
+### 추가 UX 수정
+
+- `InstallManager._state` 초기화: `isInstalled` 시 `Completed`로 시작 (앱 재실행 시 SSH 정보 바로 표시)
+- OptimizationGuide 완료 시 `finish()` 대신 CompletedPhase로 복귀
+- `optimizationGuideDone` 플래그로 무한 루프 방지
+- SSH 비밀번호 기본 노출 (구형폰 → PC로 전송 불가하므로)
 
 ---
 
@@ -397,11 +423,11 @@ InstallManager.kt (644줄)
 ├── setupSwap() — SwapManager 호출 (2GB dd)
 ├── installDropbear() — Strategy 1 (apt-get) → Strategy 2 (Java .deb) 폴백
 │   ├── tryAptGetInstall() — PRoot 내 apt-get install dropbear
-│   └── tryJavaDebExtract() — Java ArArchiveInputStream + Python zstd
+│   └── tryJavaDebExtract() — Java ArArchiveInputStream + zstd 3단계 폴백
 │       ├── downloadDebPackage() — HTTP에서 .deb 다운로드
 │       ├── extractDataTarFromDeb() — ar 아카이브에서 data.tar.* 추출
-│       ├── ensureZstExtractScript() — Python zstd 스크립트 /tmp에 작성
-│       ├── extractZstViaProot() — PRoot으로 Python 실행 ← ❌ 여기서 실패
+│       ├── ensureZstExtractScript() — Python 스트리밍 zstd 스크립트 /tmp에 작성
+│       ├── extractZstViaProot() — ✅ 3단계: tar --zstd → zstdcat|tar → Python streaming
 │       └── extractDataTarToRootfs() — xz/gz data.tar 직접 풀기 (Java)
 ├── configureDropbear() — 포트 2022 설정, 호스트 키 생성
 ├── verifyInstallation() — bash echo, dropbear binary, user id 확인

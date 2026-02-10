@@ -101,7 +101,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -159,10 +159,6 @@ dependencies {
     // rootfs tar.xz 압축 해제 + .deb ar 아카이브 파싱
     implementation "org.apache.commons:commons-compress:1.26.0"
     implementation "org.tukaani:xz:1.9"
-    // .deb 내 data.tar.zst 추출용 — 순수 Java zstd 디코더 (JNI 불필요, Android 호환)
-    // 주의: zstd-jni는 desktop JVM 전용 → Android에서 UnsatisfiedLinkError 크래시
-    implementation "io.airlift:aircompressor:0.27"
-
     // WorkManager (WatchdogWorker)
     implementation "androidx.work:work-runtime-ktx:2.9.0"
 

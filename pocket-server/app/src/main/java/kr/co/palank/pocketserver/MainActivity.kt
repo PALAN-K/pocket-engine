@@ -1,5 +1,6 @@
 package kr.co.palank.pocketserver
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -62,8 +63,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                var currentScreen by remember {
-                    mutableStateOf(if (sessionManager.isInstalled) "setup" else "setup")
+                val prefs = remember {
+                    this@MainActivity.getSharedPreferences("pocketserver_prefs", Context.MODE_PRIVATE)
+                }
+                var currentScreen by remember { mutableStateOf("setup") }
+                var optimizationGuideDone by remember {
+                    mutableStateOf(prefs.getBoolean("optimization_guide_done", false))
                 }
 
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -84,6 +89,7 @@ class MainActivity : ComponentActivity() {
                                 spec = spec,
                                 sessionManager = sessionManager,
                                 networkMonitor = networkMonitor,
+                                optimizationGuideDone = optimizationGuideDone,
                                 onNavigateToOptimizationGuide = {
                                     currentScreen = "optimization_guide"
                                 },
@@ -91,7 +97,9 @@ class MainActivity : ComponentActivity() {
 
                             "optimization_guide" -> OptimizationGuideScreen(
                                 onDismiss = {
-                                    this@MainActivity.finish()
+                                    optimizationGuideDone = true
+                                    prefs.edit().putBoolean("optimization_guide_done", true).apply()
+                                    currentScreen = "setup"
                                 },
                             )
                         }

@@ -60,6 +60,7 @@ fun SetupWizardScreen(
     spec: DeviceSpec,
     sessionManager: SessionManager,
     networkMonitor: NetworkMonitor,
+    optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
 ) {
     val installState by sessionManager.installState.collectAsState()
@@ -110,6 +111,7 @@ fun SetupWizardScreen(
                 sshPassword = sessionManager.sshPassword,
                 sshPort = sessionManager.sshPort,
                 ipAddress = networkState.ipAddress,
+                optimizationGuideDone = optimizationGuideDone,
                 onNavigateToOptimizationGuide = onNavigateToOptimizationGuide,
             )
             "error" -> ErrorPhase(
@@ -365,14 +367,13 @@ private fun CompletedPhase(
     sshPassword: String?,
     sshPort: Int,
     ipAddress: String?,
+    optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
     val extColors = PocketServerExtendedTheme.colors
     val clipboardManager = LocalClipboardManager.current
-
-    var showPassword by remember { mutableStateOf(false) }
 
     val displayIp = ipAddress ?: "IP 확인 중..."
     val displayPassword = sshPassword ?: "--------"
@@ -443,76 +444,7 @@ private fun CompletedPhase(
                 SshInfoRow(label = "사용자", value = "pocketserver")
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Password row with toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "비밀번호",
-                        fontSize = 14.sp,
-                        color = extColors.textSecondary,
-                        modifier = Modifier.width(72.dp),
-                    )
-                    Text(
-                        text = if (showPassword) displayPassword else "********",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace,
-                        color = colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Action buttons: Copy + Show password
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            val info = buildString {
-                                appendLine("주소: $displayIp")
-                                appendLine("포트: $sshPort")
-                                appendLine("사용자: pocketserver")
-                                appendLine("비밀번호: $displayPassword")
-                            }
-                            clipboardManager.setText(AnnotatedString(info))
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = colorScheme.primary,
-                        ),
-                    ) {
-                        Text(
-                            text = "복사",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = { showPassword = !showPassword },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = colorScheme.primary,
-                        ),
-                    ) {
-                        Text(
-                            text = if (showPassword) "비밀번호 숨기기" else "비밀번호 보기",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
+                SshInfoRow(label = "비밀번호", value = displayPassword)
             }
         }
 
@@ -658,30 +590,60 @@ private fun CompletedPhase(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Navigate to optimization guide
-        Button(
-            onClick = onNavigateToOptimizationGuide,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = colorScheme.primary,
-                contentColor = colorScheme.onPrimary,
-            ),
-        ) {
+        if (!optimizationGuideDone) {
+            // 최초: 백그라운드 설정으로 안내
+            Button(
+                onClick = onNavigateToOptimizationGuide,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colorScheme.primary,
+                    contentColor = colorScheme.onPrimary,
+                ),
+            ) {
+                Text(
+                    text = "백그라운드 실행 설정",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        } else {
+            // 가이드 완료 후: 부수적 버튼으로 다시 볼 수 있게
             Text(
-                text = "다음",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = "서버가 백그라운드에서 실행 중입니다",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = extColors.statusGreen,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = onNavigateToOptimizationGuide,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = extColors.textSecondary,
+                ),
+            ) {
+                Text(
+                    text = "백그라운드 설정 다시 보기",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 앱 닫아도 된다는 안내
         Text(
-            text = "이 앱은 이제 닫아도 됩니다\n서버는 백그라운드에서 계속 실행됩니다",
+            text = "이 앱은 닫아도 됩니다\n서버는 백그라운드에서 계속 실행됩니다",
             fontSize = 13.sp,
             color = extColors.textSecondary,
             textAlign = TextAlign.Center,
