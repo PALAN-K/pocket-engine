@@ -14,11 +14,13 @@ class SwapManager(
 
         val swapSizeMB = SWAP_SIZE_MB
 
+        // PRoot에서 swapon 시스콜은 불가능 (커널 시스콜, Function not implemented)
+        // 스왑 파일 생성+포맷까지만 수행. 실제 swapon 활성화는 PRoot 환경에서 불가하므로
+        // 이 스왑 파일은 향후 chroot/실제 root 환경에서만 유효함
         val commands = listOf(
             "dd if=/dev/zero of=/swapfile bs=1M count=$swapSizeMB",
             "chmod 600 /swapfile",
             "mkswap /swapfile",
-            "swapon /swapfile",
             "grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab"
         )
 

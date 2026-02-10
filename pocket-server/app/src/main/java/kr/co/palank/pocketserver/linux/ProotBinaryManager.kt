@@ -9,43 +9,58 @@ import java.security.MessageDigest
 object ProotBinaryManager {
 
     private const val TAG = "ProotBinaryManager"
-    private const val ASSET_PATH = "proot/proot"
     private const val BINARY_DIR = "proot"
-    private const val BINARY_NAME = "proot"
 
     fun getProotPath(context: Context): String {
-        return File(context.filesDir, "$BINARY_DIR/$BINARY_NAME").absolutePath
+        return File(context.filesDir, "$BINARY_DIR/proot").absolutePath
+    }
+
+    fun getLoaderPath(context: Context): String {
+        return File(context.filesDir, "$BINARY_DIR/loader").absolutePath
+    }
+
+    fun getLoader32Path(context: Context): String {
+        return File(context.filesDir, "$BINARY_DIR/loader32").absolutePath
     }
 
     fun isExtracted(context: Context): Boolean {
-        val binary = File(context.filesDir, "$BINARY_DIR/$BINARY_NAME")
-        return binary.exists() && binary.canExecute()
+        val binary = File(context.filesDir, "$BINARY_DIR/proot")
+        val loader = File(context.filesDir, "$BINARY_DIR/loader")
+        return binary.exists() && binary.canExecute() && loader.exists()
     }
 
     fun extract(context: Context) {
         val targetDir = File(context.filesDir, BINARY_DIR)
         if (!targetDir.exists()) targetDir.mkdirs()
 
-        val targetFile = File(targetDir, BINARY_NAME)
-
-        context.assets.open(ASSET_PATH).use { input ->
-            FileOutputStream(targetFile).use { output ->
-                input.copyTo(output)
+        // PRoot 바이너리 + loader + loader32 추출
+        for (name in listOf("proot", "loader", "loader32")) {
+            try {
+                val targetFile = File(targetDir, name)
+                context.assets.open("proot/$name").use { input ->
+                    FileOutputStream(targetFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                targetFile.setExecutable(true, false)
+                targetFile.setReadable(true, false)
+                Log.i(TAG, "Extracted: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
+            } catch (e: Exception) {
+                if (name == "proot") throw e // proot은 필수
+                Log.w(TAG, "Optional file not found in assets: $name")
             }
         }
 
-        targetFile.setExecutable(true, false)
-        targetFile.setReadable(true, false)
-
-        if (!targetFile.canExecute()) {
+        val prootFile = File(targetDir, "proot")
+        if (!prootFile.canExecute()) {
             throw IllegalStateException("Failed to set execute permission on PRoot binary")
         }
 
-        Log.i(TAG, "PRoot binary extracted to ${targetFile.absolutePath}")
+        Log.i(TAG, "PRoot binaries extracted to ${targetDir.absolutePath}")
     }
 
     fun computeSha256(context: Context): String {
-        val binary = File(context.filesDir, "$BINARY_DIR/$BINARY_NAME")
+        val binary = File(context.filesDir, "$BINARY_DIR/proot")
         if (!binary.exists()) throw IllegalStateException("PRoot binary not found")
 
         val digest = MessageDigest.getInstance("SHA-256")

@@ -40,23 +40,32 @@ tasks.register("downloadProot") {
             }
         }
 
-        // proot 바이너리는 tar 내 root/bin/proot 경로에 있을 수 있음
-        def extractedProot = fileTree(prootAssetsDir).matching { include "**/proot" }.files.find()
-        if (extractedProot != null && extractedProot.parentFile != prootAssetsDir) {
-            copy {
-                from extractedProot
-                into prootAssetsDir
-            }
-            // 중간 디렉토리 정리
-            prootAssetsDir.listFiles()?.each { f ->
-                if (f.isDirectory()) f.deleteDir()
-            }
+        // tarball 구조: root/bin/proot, root/libexec/proot/loader, root/libexec/proot/loader32
+        // 모든 필요 파일을 assets/proot/ 루트로 플랫하게 복사
+        def extractedProot = fileTree(prootAssetsDir).matching { include "**/bin/proot" }.files.find()
+        if (extractedProot != null) {
+            copy { from extractedProot; into prootAssetsDir }
+        }
+        def extractedLoader = fileTree(prootAssetsDir).matching { include "**/libexec/proot/loader" }.files.find()
+        if (extractedLoader != null) {
+            copy { from extractedLoader; into prootAssetsDir }
+        }
+        def extractedLoader32 = fileTree(prootAssetsDir).matching { include "**/libexec/proot/loader32" }.files.find()
+        if (extractedLoader32 != null) {
+            copy { from extractedLoader32; into prootAssetsDir }
+        }
+        // 중간 디렉토리 정리 (root/ 폴더)
+        prootAssetsDir.listFiles()?.each { f ->
+            if (f.isDirectory()) f.deleteDir()
         }
 
         if (!file("${prootAssetsDir}/proot").exists()) {
             throw new RuntimeException("PRoot binary not found after extraction")
         }
-        logger.lifecycle("PRoot binary ready at ${prootAssetsDir}/proot")
+        if (!file("${prootAssetsDir}/loader").exists()) {
+            throw new RuntimeException("PRoot loader not found after extraction")
+        }
+        logger.lifecycle("PRoot binary + loader ready at ${prootAssetsDir}/")
     }
 }
 
@@ -147,9 +156,12 @@ dependencies {
     implementation "androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2"
     implementation "androidx.datastore:datastore-preferences:1.0.0"
 
-    // rootfs tar.xz 압축 해제
+    // rootfs tar.xz 압축 해제 + .deb ar 아카이브 파싱
     implementation "org.apache.commons:commons-compress:1.26.0"
     implementation "org.tukaani:xz:1.9"
+    // .deb 내 data.tar.zst 추출용 — 순수 Java zstd 디코더 (JNI 불필요, Android 호환)
+    // 주의: zstd-jni는 desktop JVM 전용 → Android에서 UnsatisfiedLinkError 크래시
+    implementation "io.airlift:aircompressor:0.27"
 
     // WorkManager (WatchdogWorker)
     implementation "androidx.work:work-runtime-ktx:2.9.0"

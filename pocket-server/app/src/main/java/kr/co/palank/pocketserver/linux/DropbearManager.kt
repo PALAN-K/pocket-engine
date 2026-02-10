@@ -66,6 +66,8 @@ class DropbearManager(
             pb.environment().apply {
                 put("PROOT_TMP_DIR", context.cacheDir.absolutePath)
                 put("PROOT_NO_SECCOMP", "1")
+                put("PROOT_LOADER", ProotBinaryManager.getLoaderPath(context))
+                put("PROOT_LOADER_32", ProotBinaryManager.getLoader32Path(context))
             }
 
             dropbearProcess = pb.start()

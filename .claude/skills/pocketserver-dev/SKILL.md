@@ -125,6 +125,7 @@ kr.co.palank.pocketserver/
 | Manufacturer deep links | [manufacturer-deeplinks.md](references/manufacturer-deeplinks.md) |
 | WiFi IP, SSH, tunneling | [networking.md](references/networking.md) |
 | Signing keystore, app signing | [signing-keystore.md](references/signing-keystore.md) |
+| Build, ADB, device testing | [device-testing.md](references/device-testing.md) |
 
 ## IPC Protocol v1.0 (LocalSocket)
 

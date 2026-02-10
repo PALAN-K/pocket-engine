@@ -55,6 +55,8 @@ class ProotManager(private val context: Context) {
                 put("LANG", "en_US.UTF-8")
                 put("PROOT_TMP_DIR", context.cacheDir.absolutePath)
                 put("PROOT_NO_SECCOMP", "1")
+                put("PROOT_LOADER", ProotBinaryManager.getLoaderPath(context))
+                put("PROOT_LOADER_32", ProotBinaryManager.getLoader32Path(context))
             }
 
             process = pb.start()
@@ -121,6 +123,8 @@ class ProotManager(private val context: Context) {
         pb.environment().apply {
             put("PROOT_TMP_DIR", context.cacheDir.absolutePath)
             put("PROOT_NO_SECCOMP", "1")
+            put("PROOT_LOADER", ProotBinaryManager.getLoaderPath(context))
+            put("PROOT_LOADER_32", ProotBinaryManager.getLoader32Path(context))
         }
 
         val proc = pb.start()
