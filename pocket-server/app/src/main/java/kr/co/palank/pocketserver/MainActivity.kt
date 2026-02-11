@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -26,9 +27,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kr.co.palank.pocketserver.linux.InstallState
 import kr.co.palank.pocketserver.linux.SessionManager
 import kr.co.palank.pocketserver.manufacturer.OptimizationGuideScreen
 import kr.co.palank.pocketserver.monitor.NetworkMonitor
+import kr.co.palank.pocketserver.service.ServerForegroundService
 import kr.co.palank.pocketserver.ui.setup.SetupWizardScreen
 import kr.co.palank.pocketserver.ui.theme.PocketServerTheme
 import kr.co.palank.pocketserver.util.SpecChecker
@@ -51,6 +54,18 @@ class MainActivity : ComponentActivity() {
                     networkMonitor.start()
                     onDispose {
                         networkMonitor.stop()
+                    }
+                }
+
+                // Auto-start server when installation is complete
+                LaunchedEffect(Unit) {
+                    sessionManager.installState.collect { state ->
+                        if (state is InstallState.Completed) {
+                            Log.i("MainActivity", "Install completed, starting ServerForegroundService")
+                            ServerForegroundService.start(
+                                this@MainActivity, sessionManager, networkMonitor
+                            )
+                        }
                     }
                 }
 

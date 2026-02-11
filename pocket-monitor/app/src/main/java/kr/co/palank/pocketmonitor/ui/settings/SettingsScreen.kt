@@ -186,6 +186,35 @@ fun SettingsScreen(
         Divider(color = MaterialTheme.colorScheme.outline)
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Support section
+        SectionTitle("지원")
+        Spacer(modifier = Modifier.height(8.dp))
+
+        InfoRow(
+            label = "커뮤니티 (Telegram)",
+            value = "",
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(TELEGRAM_URL))
+                context.startActivity(intent)
+            },
+        )
+        InfoRow(
+            label = "이메일 문의",
+            value = "",
+            onClick = {
+                val intent = Intent(Intent.ACTION_SENDTO).apply {
+                    data = Uri.parse("mailto:$SUPPORT_EMAIL")
+                    putExtra(Intent.EXTRA_SUBJECT, "[PocketMonitor] 문의")
+                }
+                context.startActivity(intent)
+            },
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+        @Suppress("DEPRECATION")
+        Divider(color = MaterialTheme.colorScheme.outline)
+        Spacer(modifier = Modifier.height(24.dp))
+
         // App info section
         SectionTitle("앱 정보")
         Spacer(modifier = Modifier.height(8.dp))
@@ -319,3 +348,5 @@ private fun InfoRow(
 
 private const val ENGINE_DOWNLOAD_URL = "https://pocket-server-palank.web.app"
 private const val PRIVACY_POLICY_URL = "https://pocket-server-palank.web.app/privacy-ko.html"
+private const val TELEGRAM_URL = "https://t.me/pocketseever"
+private const val SUPPORT_EMAIL = "naegeon@gmail.com"

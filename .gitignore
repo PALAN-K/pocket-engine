@@ -51,9 +51,17 @@ firebase-debug.log
 
 # Node
 node_modules/
+package.json
+package-lock.json
 
 # Test artifacts
 test-screenshots/
+
+# Play Store mockup HTML (intermediate files, PNGs are committed)
+playstore-assets/*.html
+
+# Temp files
+D*temp_ula_b64.txt
 
 # Temp/debug scripts
 fix.js

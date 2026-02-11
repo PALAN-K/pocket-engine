@@ -44,6 +44,15 @@ class ServerForegroundService : Service() {
         createNotificationChannel()
         acquireWakeLock()
         acquireWifiLock()
+
+        // Ensure sessionManager and networkMonitor are available
+        // (needed when started from BootReceiver without companion vars set)
+        if (sessionManager == null) {
+            sessionManager = SessionManager(this)
+        }
+        if (networkMonitor == null) {
+            networkMonitor = NetworkMonitor(this).also { it.start() }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

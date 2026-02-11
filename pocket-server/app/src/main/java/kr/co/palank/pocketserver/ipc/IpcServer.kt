@@ -146,7 +146,7 @@ class IpcServer(
             put("uptime", sessionManager.uptimeMillis)
             put("ip", networkState.ipAddress ?: JSONObject.NULL)
             put("port", sessionManager.sshPort)
-            put("user", "pocketserver")
+            put("user", "root")
             put("disk_used", diskUsed)
             put("disk_total", diskTotal)
             if (state is ServerState.Error) {

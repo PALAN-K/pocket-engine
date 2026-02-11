@@ -135,6 +135,13 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        // PRoot/busybox 등 ELF 바이너리를 strip하지 않도록 설정
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+    packagingOptions {
+        doNotStrip '**/*.so'
     }
 }
 

@@ -54,6 +54,11 @@ class InstallManager(private val context: Context) {
     val sshPassword: String?
         get() = prefs.getString(KEY_SSH_PASSWORD, null)
 
+    /**
+     * Resumable installation — checks step markers and skips already-completed steps.
+     * On failure, completed steps are preserved so next retry resumes from the failure point.
+     * Inspired by UserLand's .success_filesystem_extraction marker pattern.
+     */
     suspend fun startInstallation() {
         if (isInstalled) {
             _state.value = InstallState.Completed
@@ -61,38 +66,70 @@ class InstallManager(private val context: Context) {
         }
 
         try {
+            val rootfsDir = File(context.filesDir, "ubuntu")
+
             // Step 1: PRoot 바이너리 추출 (0-5%)
-            _state.value = InstallState.Progress(0, "PRoot 환경 초기화 중...")
-            withContext(Dispatchers.IO) {
-                ProotBinaryManager.ensureReady(context)
+            if (!stepDone(STEP_PROOT_EXTRACTED)) {
+                _state.value = InstallState.Progress(0, "PRoot 환경 초기화 중...")
+                withContext(Dispatchers.IO) {
+                    ProotBinaryManager.ensureReady(context)
+                }
+                markStep(STEP_PROOT_EXTRACTED)
             }
             _state.value = InstallState.Progress(5, "PRoot 준비 완료")
 
             // Step 2: rootfs 다운로드 (5-40%)
-            val rootfsDir = File(context.filesDir, "ubuntu")
-            if (!rootfsDir.exists() || rootfsDir.list()?.isEmpty() != false) {
-                _state.value = InstallState.Progress(5, "Ubuntu 24.04 다운로드 중...")
-                val tarball = downloadRootfs()
+            if (!stepDone(STEP_ROOTFS_DOWNLOADED)) {
+                if (!rootfsDir.exists() || rootfsDir.list()?.isEmpty() != false) {
+                    _state.value = InstallState.Progress(5, "Ubuntu 24.04 다운로드 중...")
+                    val tarball = downloadRootfs()
 
-                // Step 3: 압축 해제 (40-60%)
-                _state.value = InstallState.Progress(40, "시스템 압축 해제 중...")
-                extractRootfs(tarball, rootfsDir)
-                tarball.delete()
+                    // Step 3: 압축 해제 (40-60%)
+                    if (!stepDone(STEP_ROOTFS_EXTRACTED)) {
+                        _state.value = InstallState.Progress(40, "시스템 압축 해제 중...")
+                        extractRootfs(tarball, rootfsDir)
+                        markStep(STEP_ROOTFS_EXTRACTED)
+                    }
+                    tarball.delete()
+                    markStep(STEP_ROOTFS_DOWNLOADED)
+                } else {
+                    _state.value = InstallState.Progress(60, "기존 rootfs 감지됨, 건너뜀")
+                    markStep(STEP_ROOTFS_DOWNLOADED)
+                    markStep(STEP_ROOTFS_EXTRACTED)
+                }
             } else {
-                _state.value = InstallState.Progress(60, "기존 rootfs 감지됨, 건너뜀")
+                _state.value = InstallState.Progress(60, "rootfs 다운로드 완료 (이전 세션)")
+            }
+
+            // Step 3.5: UserLand 지원 파일 복사 (rootfs/support/)
+            if (!stepDone(STEP_SUPPORT_COPIED)) {
+                _state.value = InstallState.Progress(58, "지원 파일 설정 중...")
+                withContext(Dispatchers.IO) {
+                    ProotBinaryManager.setupRootfsSupport(context, rootfsDir)
+                }
+                markStep(STEP_SUPPORT_COPIED)
             }
 
             // Step 4: 시스템 설정 (60-72%)
-            _state.value = InstallState.Progress(60, "시스템 설정 중...")
-            configureSystem()
+            if (!stepDone(STEP_CONFIGURED)) {
+                _state.value = InstallState.Progress(60, "시스템 설정 중...")
+                configureSystem()
+                markStep(STEP_CONFIGURED)
+            }
 
             // Step 5: 스왑 메모리 설정 (72-78%)
-            _state.value = InstallState.Progress(72, "스왑 메모리 설정 중...")
-            setupSwap()
+            if (!stepDone(STEP_SWAP_DONE)) {
+                _state.value = InstallState.Progress(72, "스왑 메모리 설정 중...")
+                setupSwap()
+                markStep(STEP_SWAP_DONE)
+            }
 
             // Step 6: Dropbear 설치 (78-92%)
-            _state.value = InstallState.Progress(78, "SSH 서버 설치 중...")
-            installDropbear()
+            if (!stepDone(STEP_DROPBEAR_INSTALLED)) {
+                _state.value = InstallState.Progress(78, "SSH 서버 설치 중...")
+                installDropbear()
+                markStep(STEP_DROPBEAR_INSTALLED)
+            }
 
             // Step 7: 최종 검증 (92-100%)
             _state.value = InstallState.Progress(92, "설치 검증 중...")
@@ -104,30 +141,115 @@ class InstallManager(private val context: Context) {
             Log.i(TAG, "Installation completed successfully")
 
         } catch (e: Exception) {
-            Log.e(TAG, "Installation failed", e)
+            Log.e(TAG, "Installation failed (completed steps preserved for retry)", e)
             _state.value = InstallState.Error(e.message ?: "알 수 없는 오류 발생")
         }
     }
 
+    private fun stepDone(key: String): Boolean = prefs.getBoolean(key, false)
+
+    private fun markStep(key: String) {
+        prefs.edit().putBoolean(key, true).apply()
+        Log.i(TAG, "Step completed: $key")
+    }
+
+    /**
+     * Download rootfs with mirror fallback + exponential backoff retry.
+     * Tries each mirror URL up to MAX_RETRIES_PER_URL times before moving to next mirror.
+     */
+    /**
+     * Download rootfs with mirror fallback + exponential backoff retry + HTTP Range resume.
+     * Partial downloads are preserved across retries so resume works automatically.
+     * Only deletes partial file when switching to a different mirror (incompatible file).
+     */
     private suspend fun downloadRootfs(): File = withContext(Dispatchers.IO) {
         val targetFile = File(context.cacheDir, "ubuntu-rootfs.tar.xz")
-        if (targetFile.exists()) targetFile.delete()
 
-        val url = URL(ROOTFS_URL)
-        val connection = url.openConnection() as HttpURLConnection
-        connection.connectTimeout = 30_000
-        connection.readTimeout = 60_000
-        connection.connect()
+        var lastError: Exception? = null
 
-        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-            throw RuntimeException("rootfs 다운로드 실패: HTTP ${connection.responseCode}")
+        for ((mirrorIndex, mirrorUrl) in ROOTFS_URLS.withIndex()) {
+            // When switching mirrors, delete partial file (different server = incompatible resume)
+            if (mirrorIndex > 0 && targetFile.exists()) {
+                targetFile.delete()
+                Log.i(TAG, "Switching mirror, deleted partial file")
+            }
+
+            for (attempt in 1..MAX_RETRIES_PER_URL) {
+                try {
+                    _state.value = InstallState.Progress(
+                        5, "Ubuntu 24.04 다운로드 중... (미러 ${mirrorIndex + 1}/${ROOTFS_URLS.size}, 시도 $attempt/$MAX_RETRIES_PER_URL)"
+                    )
+
+                    downloadFile(mirrorUrl, targetFile)
+
+                    if (targetFile.length() > 0) {
+                        Log.i(TAG, "rootfs downloaded: ${targetFile.length()} bytes from mirror #${mirrorIndex + 1}")
+                        return@withContext targetFile
+                    }
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(TAG, "Download failed (mirror #${mirrorIndex + 1}, attempt $attempt/$MAX_RETRIES_PER_URL): ${e.message}")
+                    // Do NOT delete partial file — next retry will resume via Range header
+
+                    if (attempt < MAX_RETRIES_PER_URL) {
+                        val delayMs = INITIAL_RETRY_DELAY_MS * (1L shl (attempt - 1)) // 2s, 4s, 8s
+                        _state.value = InstallState.Progress(
+                            5, "다운로드 재시도 대기 중... (${delayMs / 1000}초)"
+                        )
+                        kotlinx.coroutines.delay(delayMs)
+                    }
+                }
+            }
         }
 
-        val totalSize = connection.contentLengthLong
-        var downloadedSize = 0L
+        throw RuntimeException("모든 미러에서 rootfs 다운로드 실패", lastError)
+    }
+
+    /**
+     * Download a single file with HTTP Range resume support + progress tracking.
+     * If a partial file already exists, sends Range header to resume from that point.
+     * This eliminates the need for Android DownloadManager while providing resume capability.
+     */
+    private fun downloadFile(urlStr: String, targetFile: File) {
+        val existingSize = if (targetFile.exists()) targetFile.length() else 0L
+
+        val url = URL(urlStr)
+        val connection = url.openConnection() as HttpURLConnection
+        connection.connectTimeout = 30_000
+        connection.readTimeout = 90_000
+        connection.instanceFollowRedirects = true
+
+        // Resume: request bytes from where we left off
+        if (existingSize > 0) {
+            connection.setRequestProperty("Range", "bytes=$existingSize-")
+            Log.i(TAG, "Resuming download from byte $existingSize")
+        }
+
+        connection.connect()
+
+        val responseCode = connection.responseCode
+
+        // 206 = Partial Content (resume accepted), 200 = full download
+        val isResume = responseCode == HttpURLConnection.HTTP_PARTIAL
+        if (responseCode != HttpURLConnection.HTTP_OK && !isResume) {
+            throw RuntimeException("HTTP $responseCode from $urlStr")
+        }
+
+        // If server doesn't support Range (returned 200 instead of 206), restart from scratch
+        val downloadedSoFar = if (isResume) existingSize else 0L
+        val contentLength = connection.contentLengthLong
+        val totalSize = if (isResume) downloadedSoFar + contentLength else contentLength
+
+        if (!isResume && existingSize > 0) {
+            Log.w(TAG, "Server doesn't support Range, restarting download from scratch")
+            targetFile.delete()
+        }
+
+        var downloadedSize = downloadedSoFar
+        val appendMode = isResume
 
         connection.inputStream.buffered().use { input ->
-            FileOutputStream(targetFile).use { output ->
+            FileOutputStream(targetFile, appendMode).use { output ->
                 val buffer = ByteArray(8192)
                 var bytesRead: Int
                 while (input.read(buffer).also { bytesRead = it } != -1) {
@@ -144,9 +266,6 @@ class InstallManager(private val context: Context) {
                 }
             }
         }
-
-        Log.i(TAG, "rootfs downloaded: ${targetFile.length()} bytes")
-        targetFile
     }
 
     private suspend fun extractRootfs(tarball: File, targetDir: File) = withContext(Dispatchers.IO) {
@@ -218,6 +337,19 @@ class InstallManager(private val context: Context) {
     private suspend fun configureSystem() {
         val rootfsDir = File(context.filesDir, "ubuntu")
 
+        // Ensure required directories exist (UserLand pattern)
+        // /root is critical — Dropbear chdir(pw_dir) fails if /root doesn't exist
+        for (dir in listOf("tmp", "run", "var/run", "etc/profile.d", "etc/dropbear", "root", "home/pocketserver")) {
+            File(rootfsDir, dir).mkdirs()
+        }
+
+        // UserLand userland_profile.sh pattern: clear Android LD_PRELOAD/LD_LIBRARY_PATH
+        File(rootfsDir, "etc/profile.d/pocketserver.sh").writeText(
+            "#!/bin/sh\nunset LD_PRELOAD\nunset LD_LIBRARY_PATH\n" +
+            "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+        )
+        Log.i(TAG, "Profile script written to /etc/profile.d/pocketserver.sh")
+
         _state.value = InstallState.Progress(61, "DNS 설정 중...")
         // resolv.conf가 심볼릭 링크일 수 있으므로 먼저 삭제
         prootManager.exec("/bin/sh", "-c",
@@ -247,6 +379,13 @@ class InstallManager(private val context: Context) {
         val password = generatePassword()
         prefs.edit().putString(KEY_SSH_PASSWORD, password).apply()
 
+        // PRoot에서는 fake root이므로 root 비밀번호를 설정하여 SSH 접속
+        // Dropbear의 setuid()/initgroups()가 PRoot에서 실패하므로 root 로그인 사용
+        prootManager.exec("/bin/sh", "-c",
+            "echo 'root:$password' | chpasswd"
+        )
+
+        // pocketserver 유저도 생성 (향후 사용 가능)
         prootManager.exec("/bin/sh", "-c",
             "id pocketserver >/dev/null 2>&1 || useradd -m -s /bin/bash pocketserver"
         )
@@ -254,7 +393,25 @@ class InstallManager(private val context: Context) {
             "echo 'pocketserver:$password' | chpasswd"
         )
 
-        Log.i(TAG, "System configured, user 'pocketserver' created")
+        // Copy shadow password hashes into /etc/passwd for non-root Dropbear compatibility.
+        // When Dropbear runs without -0 (getuid()!=0), getspnam() may fail,
+        // so it falls back to /etc/passwd — if password field is "x", auth fails.
+        // This ensures auth works in both -0 and non -0 modes.
+        prootManager.exec("/bin/sh", "-c",
+            "HASH=\$(grep '^root:' /etc/shadow | cut -d: -f2) && " +
+            "sed -i \"s|^root:x:|root:\$HASH:|\" /etc/passwd"
+        )
+        prootManager.exec("/bin/sh", "-c",
+            "HASH=\$(grep '^pocketserver:' /etc/shadow | cut -d: -f2) && " +
+            "sed -i \"s|^pocketserver:x:|pocketserver:\$HASH:|\" /etc/passwd"
+        )
+
+        // Ensure /root has correct permissions and .bashrc
+        prootManager.exec("/bin/sh", "-c",
+            "chmod 700 /root && test -f /root/.bashrc || echo '# .bashrc' > /root/.bashrc"
+        )
+
+        Log.i(TAG, "System configured, root and 'pocketserver' passwords set (shadow+passwd)")
     }
 
     private suspend fun setupSwap() {
@@ -476,28 +633,35 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
         var lastError: Exception? = null
 
         for (urlStr in urls) {
-            try {
-                val url = URL(urlStr)
-                val conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 30_000
-                conn.readTimeout = 60_000
-                conn.instanceFollowRedirects = true
-                conn.connect()
+            for (attempt in 1..MAX_RETRIES_PER_URL) {
+                try {
+                    val url = URL(urlStr)
+                    val conn = url.openConnection() as HttpURLConnection
+                    conn.connectTimeout = 30_000
+                    conn.readTimeout = 60_000
+                    conn.instanceFollowRedirects = true
+                    conn.connect()
 
-                if (conn.responseCode == HttpURLConnection.HTTP_OK) {
-                    conn.inputStream.buffered().use { input ->
-                        FileOutputStream(targetFile).use { output ->
-                            input.copyTo(output)
+                    if (conn.responseCode == HttpURLConnection.HTTP_OK) {
+                        conn.inputStream.buffered().use { input ->
+                            FileOutputStream(targetFile).use { output ->
+                                input.copyTo(output)
+                            }
                         }
+                        Log.i(TAG, "Downloaded ${deb.name}: ${targetFile.length()} bytes from $urlStr (attempt $attempt)")
+                        return targetFile
+                    } else {
+                        Log.w(TAG, "HTTP ${conn.responseCode} for $urlStr (attempt $attempt)")
                     }
-                    Log.i(TAG, "Downloaded ${deb.name}: ${targetFile.length()} bytes from $urlStr")
-                    return targetFile
-                } else {
-                    Log.w(TAG, "HTTP ${conn.responseCode} for $urlStr")
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(TAG, "Download failed for $urlStr (attempt $attempt): ${e.message}")
                 }
-            } catch (e: Exception) {
-                lastError = e
-                Log.w(TAG, "Download failed for $urlStr: ${e.message}")
+
+                if (attempt < MAX_RETRIES_PER_URL) {
+                    val delayMs = INITIAL_RETRY_DELAY_MS * (1L shl (attempt - 1))
+                    Thread.sleep(delayMs)
+                }
             }
         }
 
@@ -612,7 +776,7 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
 
         prootManager.exec("/bin/sh", "-c",
             "echo 'DROPBEAR_PORT=2022' > /etc/default/dropbear && " +
-            "echo 'DROPBEAR_EXTRA_ARGS=\"-w\"' >> /etc/default/dropbear && " +
+            "echo 'DROPBEAR_EXTRA_ARGS=\"\"' >> /etc/default/dropbear && " +
             "echo 'NO_START=0' >> /etc/default/dropbear"
         )
 
@@ -660,9 +824,16 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
         prefs.edit()
             .remove(KEY_INSTALLED)
             .remove(KEY_SSH_PASSWORD)
+            .remove(STEP_PROOT_EXTRACTED)
+            .remove(STEP_ROOTFS_DOWNLOADED)
+            .remove(STEP_ROOTFS_EXTRACTED)
+            .remove(STEP_SUPPORT_COPIED)
+            .remove(STEP_CONFIGURED)
+            .remove(STEP_SWAP_DONE)
+            .remove(STEP_DROPBEAR_INSTALLED)
             .apply()
         _state.value = InstallState.Idle
-        Log.i(TAG, "Installation reset")
+        Log.i(TAG, "Installation reset (all step markers cleared)")
     }
 
     companion object {
@@ -670,9 +841,26 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
         private const val PREFS_NAME = "pocketserver_prefs"
         private const val KEY_INSTALLED = "server_installed"
         private const val KEY_SSH_PASSWORD = "ssh_password"
-        private const val ROOTFS_URL =
+
+        // Step markers for resumable installation (UserLand .success_* pattern)
+        private const val STEP_PROOT_EXTRACTED = "step_proot_extracted"
+        private const val STEP_ROOTFS_DOWNLOADED = "step_rootfs_downloaded"
+        private const val STEP_ROOTFS_EXTRACTED = "step_rootfs_extracted"
+        private const val STEP_SUPPORT_COPIED = "step_support_copied"
+        private const val STEP_CONFIGURED = "step_configured"
+        private const val STEP_SWAP_DONE = "step_swap_done"
+        private const val STEP_DROPBEAR_INSTALLED = "step_dropbear_installed"
+        // 3 mirror URLs for rootfs — tries in order, each with retry
+        private val ROOTFS_URLS = listOf(
             "https://cloud-images.ubuntu.com/minimal/releases/noble/release/" +
-            "ubuntu-24.04-minimal-cloudimg-arm64-root.tar.xz"
+                "ubuntu-24.04-minimal-cloudimg-arm64-root.tar.xz",
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/noble/release/" +
+                "ubuntu-base-24.04.2-base-arm64.tar.gz",
+            "https://pub-832ccadf097e4bf687650db1e57df66b.r2.dev/" +
+                "ubuntu-24.04-minimal-cloudimg-arm64-root.tar.xz"
+        )
+        private const val MAX_RETRIES_PER_URL = 3
+        private const val INITIAL_RETRY_DELAY_MS = 2000L
 
         // Dropbear .deb packages — Java-side extraction (Strategy 2)
         // Noble (24.04) primary + Jammy (22.04) fallback

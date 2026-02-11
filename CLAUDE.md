@@ -68,6 +68,11 @@ PocketMonitor (Play Store)     PocketServer Engine (Sideload)
 - **Task Anchor**: @docs/03_TASK_ANCHOR.md ← 세션 시작 시 반드시 읽을 것
 - **GitHub**: https://github.com/naegeon/pocket-server.git
 
+## Build
+- JAVA_HOME: `D:\Androidstudio\jbr` — Android Studio 내장 JBR 사용
+- 빌드: `export JAVA_HOME="/d/Androidstudio/jbr" && cd pocket-server && ./gradlew assembleDebug`
+- 실기기 설치: `adb install -r pocket-server/app/build/outputs/apk/debug/app-debug.apk` (ADB: `C:\Users\jayeo\AppData\Local\Android\Sdk\platform-tools`)
+
 ## Git
 - Branch: feature/*, fix/*, refactor/*
 - Commits: imperative mood, concise, reference PRD FM/FE numbers

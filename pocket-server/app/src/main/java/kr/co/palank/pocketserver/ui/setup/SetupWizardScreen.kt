@@ -377,7 +377,7 @@ private fun CompletedPhase(
 
     val displayIp = ipAddress ?: "IP 확인 중..."
     val displayPassword = sshPassword ?: "--------"
-    val sshCommand = "ssh pocketserver@$displayIp -p $sshPort"
+    val sshCommand = "ssh root@$displayIp -p $sshPort"
 
     Column(
         modifier = Modifier
@@ -441,7 +441,7 @@ private fun CompletedPhase(
                 Spacer(modifier = Modifier.height(10.dp))
                 SshInfoRow(label = "포트", value = "$sshPort")
                 Spacer(modifier = Modifier.height(10.dp))
-                SshInfoRow(label = "사용자", value = "pocketserver")
+                SshInfoRow(label = "사용자", value = "root")
                 Spacer(modifier = Modifier.height(10.dp))
 
                 SshInfoRow(label = "비밀번호", value = displayPassword)
@@ -585,6 +585,53 @@ private fun CompletedPhase(
                 SafetyTipRow(text = "금속판 또는 타일 위에 배치")
                 Spacer(modifier = Modifier.height(8.dp))
                 SafetyTipRow(text = "월 1회 배터리 팽창 여부 점검")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Telegram 커뮤니티 카드
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = colorScheme.surfaceVariant,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "도움이 필요하거나 다른 사용자와\n경험을 나누고 싶다면",
+                    fontSize = 14.sp,
+                    color = colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp,
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://t.me/pocketseever"),
+                        )
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        text = "Telegram 커뮤니티 참여",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
 
