@@ -157,6 +157,20 @@ class ProotManager(private val context: Context) {
             cmd.add("-b")
             cmd.add("${versionFile.absolutePath}:/proc/version")
         }
+        // /proc/net/ is restricted on Android 10+ (EACCES).
+        // Node.js os.networkInterfaces() and many Linux tools need these files.
+        if (!File("/proc/net/dev").canRead()) {
+            val netDevFile = File(supportPath, "proc_net_dev")
+            generateProcNetDev(netDevFile)
+            cmd.add("-b")
+            cmd.add("${netDevFile.absolutePath}:/proc/net/dev")
+        }
+        if (!File("/proc/net/if_inet6").canRead()) {
+            val ifInet6File = File(supportPath, "proc_net_if_inet6")
+            ifInet6File.writeText("00000000000000000000000000000001 01 80 10 80       lo\n")
+            cmd.add("-b")
+            cmd.add("${ifInet6File.absolutePath}:/proc/net/if_inet6")
+        }
 
         // Layer 2: inner /usr/bin/env -i clears PRoot's own env vars
         // (LD_LIBRARY_PATH pointing to Android support dir, PROOT_* vars)
@@ -192,12 +206,46 @@ class ProotManager(private val context: Context) {
      * from leaking into Dropbear child processes, which would break glibc
      * getpwnam()/getspnam() → chdir("/") failed.
      */
-    internal fun buildInnerEnvironment(): Map<String, String> = mapOf(
-        "HOME" to "/root",
-        "TERM" to "xterm-256color",
-        "LANG" to "en_US.UTF-8",
-        "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    )
+    internal fun buildInnerEnvironment(): Map<String, String> {
+        ensureNetFixScript()
+        return mapOf(
+            "HOME" to "/root",
+            "TERM" to "xterm-256color",
+            "LANG" to "en_US.UTF-8",
+            "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        )
+    }
+
+    /**
+     * Android restricts netlink sockets in PRoot, so Node.js os.networkInterfaces()
+     * throws EACCES. This creates:
+     * 1. /usr/local/lib/net-fix.js — patches os.networkInterfaces() with fallback
+     * 2. /etc/profile.d/pocketserver.sh — sets NODE_OPTIONS for all SSH sessions
+     */
+    private fun ensureNetFixScript() {
+        val netFixFile = File(rootfsPath, "usr/local/lib/net-fix.js")
+        if (!netFixFile.exists()) {
+            netFixFile.parentFile?.mkdirs()
+            netFixFile.writeText("""
+const os = require('os');
+const _ni = os.networkInterfaces;
+os.networkInterfaces = function() {
+  try { return _ni.call(this); } catch (e) {
+    return {
+      lo: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', mac: '00:00:00:00:00:00', internal: true, cidr: '127.0.0.1/8' }]
+    };
+  }
+};
+""".trimIndent() + "\n")
+        }
+        val profileDir = File(rootfsPath, "etc/profile.d")
+        val profileScript = File(profileDir, "pocketserver.sh")
+        if (!profileScript.exists()) {
+            profileDir.mkdirs()
+            profileScript.writeText("export NODE_OPTIONS=\"--require /usr/local/lib/net-fix.js\"\n")
+            profileScript.setExecutable(true, false)
+        }
+    }
 
     /**
      * Wrap a PRoot command with "busybox env -i VAR=val ... proot ..."
@@ -362,6 +410,14 @@ class ProotManager(private val context: Context) {
     private fun ensureRootfsDirectories() {
         File(rootfsPath, "tmp").mkdirs()
         File(rootfsPath, "support").mkdirs()
+    }
+
+    private fun generateProcNetDev(file: File) {
+        val header = """Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed"""
+        val lo = "    lo:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0"
+        val wlan = " wlan0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0"
+        file.writeText("$header\n$lo\n$wlan\n")
     }
 
     data class ExecResult(val exitCode: Int, val output: String) {
