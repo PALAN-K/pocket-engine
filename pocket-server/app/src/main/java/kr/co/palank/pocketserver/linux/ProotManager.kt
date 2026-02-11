@@ -182,8 +182,7 @@ class ProotManager(private val context: Context) {
         "LD_LIBRARY_PATH" to supportPath,
         "PROOT_TMP_DIR" to "$rootfsPath/support/",
         "PROOT_LOADER" to ProotBinaryManager.getLoaderPath(context),
-        "PROOT_LOADER_32" to ProotBinaryManager.getLoader32Path(context),
-        "PROOT_NO_SECCOMP" to "1"
+        "PROOT_LOADER_32" to ProotBinaryManager.getLoader32Path(context)
     )
 
     /**
