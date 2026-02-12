@@ -117,6 +117,7 @@ class ProotManager(private val context: Context) {
         }
 
         val ldSoPreload = File(rootfsPath, "support/ld.so.preload")
+        ensureNetstubInLdPreload(ldSoPreload)
         if (ldSoPreload.exists()) {
             cmd.add("-b")
             cmd.add("${ldSoPreload.absolutePath}:/etc/ld.so.preload")
@@ -220,31 +221,107 @@ class ProotManager(private val context: Context) {
      * Android restricts netlink sockets in PRoot, so Node.js os.networkInterfaces()
      * throws EACCES. This creates:
      * 1. /usr/local/lib/net-fix.js — patches os.networkInterfaces() with fallback
-     * 2. /etc/profile.d/pocketserver.sh — sets NODE_OPTIONS for all SSH sessions
+     *    that reads the real WiFi IP from /support/wifi_ip (written by NetworkMonitor)
+     * 2. NODE_OPTIONS set in MULTIPLE locations to cover both interactive and
+     *    non-interactive sessions (daemon mode, nohup, cron, etc.):
+     *    - /etc/profile.d/pocketserver.sh (interactive login shells)
+     *    - /etc/environment (PAM/login, ssh non-interactive)
+     *    - /etc/bash.bashrc (system-wide bash, including non-login)
+     *    - /root/.bashrc (root user's shell)
+     *
+     * Always re-writes the files to pick up any improvements to the script.
      */
-    private fun ensureNetFixScript() {
+    internal fun ensureNetFixScript() {
+        val nodeOptions = "--require /usr/local/lib/net-fix.js"
+
+        // 1. net-fix.js — reads /support/wifi_ip for real WiFi IP
         val netFixFile = File(rootfsPath, "usr/local/lib/net-fix.js")
-        if (!netFixFile.exists()) {
-            netFixFile.parentFile?.mkdirs()
-            netFixFile.writeText("""
+        netFixFile.parentFile?.mkdirs()
+        netFixFile.writeText("""
 const os = require('os');
+const fs = require('fs');
 const _ni = os.networkInterfaces;
 os.networkInterfaces = function() {
   try { return _ni.call(this); } catch (e) {
-    return {
+    const result = {
       lo: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', mac: '00:00:00:00:00:00', internal: true, cidr: '127.0.0.1/8' }]
     };
+    try {
+      const ip = fs.readFileSync('/support/wifi_ip', 'utf8').trim();
+      if (ip) {
+        result.wlan0 = [{ address: ip, netmask: '255.255.255.0', family: 'IPv4', mac: '00:00:00:00:00:00', internal: false, cidr: ip + '/24' }];
+      }
+    } catch (_) {}
+    return result;
   }
 };
 """.trimIndent() + "\n")
-        }
+
+        // 2a. /etc/profile.d/pocketserver.sh (interactive login shells via SSH)
         val profileDir = File(rootfsPath, "etc/profile.d")
         val profileScript = File(profileDir, "pocketserver.sh")
-        if (!profileScript.exists()) {
-            profileDir.mkdirs()
-            profileScript.writeText("export NODE_OPTIONS=\"--require /usr/local/lib/net-fix.js\"\n")
-            profileScript.setExecutable(true, false)
+        profileDir.mkdirs()
+        profileScript.writeText("export NODE_OPTIONS=\"$nodeOptions\"\n")
+        profileScript.setExecutable(true, false)
+
+        // 2b. /etc/environment (read by PAM/login, ssh ForceCommand, systemd services)
+        val envFile = File(rootfsPath, "etc/environment")
+        ensureLineInFile(envFile, "NODE_OPTIONS=", "NODE_OPTIONS=\"$nodeOptions\"")
+
+        // 2c. /etc/bash.bashrc (system-wide bash — non-login interactive + non-interactive)
+        val bashrcSystem = File(rootfsPath, "etc/bash.bashrc")
+        ensureLineInFile(bashrcSystem, "NODE_OPTIONS=", "export NODE_OPTIONS=\"$nodeOptions\"")
+
+        // 2d. /root/.bashrc (root user's shell)
+        val bashrcRoot = File(rootfsPath, "root/.bashrc")
+        ensureLineInFile(bashrcRoot, "NODE_OPTIONS=", "export NODE_OPTIONS=\"$nodeOptions\"")
+    }
+
+    /**
+     * Ensure a line with the given prefix exists in a file.
+     * If a line starting with [prefix] already exists, replace it.
+     * If not, append the [fullLine] at the end.
+     */
+    private fun ensureLineInFile(file: File, prefix: String, fullLine: String) {
+        file.parentFile?.mkdirs()
+        if (!file.exists()) {
+            file.writeText("$fullLine\n")
+            return
         }
+        val lines = file.readLines().toMutableList()
+        val idx = lines.indexOfFirst { it.trimStart().startsWith(prefix) }
+        if (idx >= 0) {
+            if (lines[idx].trim() == fullLine) return // already correct
+            lines[idx] = fullLine
+        } else {
+            lines.add(fullLine)
+        }
+        file.writeText(lines.joinToString("\n") + "\n")
+    }
+
+    /**
+     * Ensure libnetstub.so is registered in ld.so.preload if the .so file exists.
+     * Called on every PRoot command build to handle upgrades from older installations
+     * that didn't have netstub. Safe to call repeatedly (idempotent).
+     */
+    private fun ensureNetstubInLdPreload(ldPreloadFile: File) {
+        val netstubSo = File(rootfsPath, "usr/local/lib/libnetstub.so")
+        if (!netstubSo.exists() || netstubSo.length() == 0L) return
+
+        val netstubPath = "/usr/local/lib/libnetstub.so"
+
+        if (!ldPreloadFile.exists()) {
+            ldPreloadFile.parentFile?.mkdirs()
+            ldPreloadFile.writeText("$netstubPath\n")
+            Log.i(TAG, "Created ld.so.preload with libnetstub.so")
+            return
+        }
+
+        val content = ldPreloadFile.readText()
+        if (content.contains(netstubPath)) return
+
+        ldPreloadFile.writeText(content.trimEnd() + "\n" + netstubPath + "\n")
+        Log.i(TAG, "Appended libnetstub.so to ld.so.preload")
     }
 
     /**

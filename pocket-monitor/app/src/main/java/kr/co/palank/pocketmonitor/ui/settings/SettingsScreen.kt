@@ -219,7 +219,14 @@ fun SettingsScreen(
         SectionTitle("앱 정보")
         Spacer(modifier = Modifier.height(8.dp))
 
-        InfoRow(label = "버전", value = "1.0")
+        val versionName = remember {
+            try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+            } catch (e: Exception) {
+                "unknown"
+            }
+        }
+        InfoRow(label = "버전", value = versionName)
         InfoRow(
             label = "오픈소스 라이선스",
             value = "",

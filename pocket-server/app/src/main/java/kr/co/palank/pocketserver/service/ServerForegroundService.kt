@@ -62,6 +62,9 @@ class ServerForegroundService : Service() {
                 startForegroundCompat(notification)
                 startIpcServer()
 
+                // Write WiFi IP file before PRoot starts so net-fix.js has it immediately
+                networkMonitor?.writeCurrentIpFile()
+
                 sessionManager?.let { manager ->
                     serviceScope.launch {
                         manager.start()
@@ -81,6 +84,9 @@ class ServerForegroundService : Service() {
                 val notification = createNotification("서버 실행 중", "PocketServer가 백그라운드에서 동작하고 있습니다.")
                 startForegroundCompat(notification)
                 startIpcServer()
+
+                // Write WiFi IP file before PRoot starts so net-fix.js has it immediately
+                networkMonitor?.writeCurrentIpFile()
 
                 sessionManager?.let { manager ->
                     if (manager.isInstalled) {

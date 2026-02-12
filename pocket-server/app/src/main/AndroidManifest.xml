@@ -11,6 +11,12 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Engine은 사이드로드 앱이므로 <queries> 사용 가능 (Play Store 정책 무관) -->
+    <!-- Monitor 앱 설치 여부 확인용 (Android 11+ 패키지 가시성 제한) -->
+    <queries>
+        <package android:name="kr.co.palank.pocketmonitor" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:extractNativeLibs="true"

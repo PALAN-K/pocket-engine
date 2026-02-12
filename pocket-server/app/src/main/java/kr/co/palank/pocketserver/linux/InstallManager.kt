@@ -124,11 +124,20 @@ class InstallManager(private val context: Context) {
                 markStep(STEP_SWAP_DONE)
             }
 
-            // Step 6: Dropbear 설치 (78-92%)
+            // Step 6: Dropbear 설치 (78-89%)
             if (!stepDone(STEP_DROPBEAR_INSTALLED)) {
                 _state.value = InstallState.Progress(78, "SSH 서버 설치 중...")
                 installDropbear()
                 markStep(STEP_DROPBEAR_INSTALLED)
+            }
+
+            // Step 6.5: libnetstub.so 설치 (89-92%)
+            // getifaddrs() LD_PRELOAD shim — Android 11+ netlink EACCES 대응
+            // Python, Go, Rust, Node.js 등 모든 언어에서 네트워크 인터페이스 조회 가능
+            if (!stepDone(STEP_NETSTUB_INSTALLED)) {
+                _state.value = InstallState.Progress(89, "네트워크 호환성 라이브러리 설치 중...")
+                installNetStub()
+                markStep(STEP_NETSTUB_INSTALLED)
             }
 
             // Step 7: 최종 검증 (92-100%)
@@ -796,6 +805,110 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
         }
     }
 
+    /**
+     * Install libnetstub.so — LD_PRELOAD shim that intercepts getifaddrs().
+     *
+     * On Android 11+, netlink socket bind() returns EACCES for unprivileged apps.
+     * This breaks getifaddrs() used by Python (socket.if_nameindex, psutil),
+     * Go (net.Interfaces), Rust (nix::ifaddrs), and many other languages/libraries.
+     * Node.js has a separate fix via net-fix.js, but this covers ALL native code.
+     *
+     * The shim:
+     * 1. Calls the real getifaddrs() via dlsym(RTLD_NEXT)
+     * 2. If it fails with EACCES, falls back to:
+     *    - ioctl(SIOCGIFCONF) for IPv4 interfaces
+     *    - Parsing /proc/net/if_inet6 for IPv6 addresses
+     * 3. Returns a synthetic struct ifaddrs linked list
+     *
+     * Registered in /etc/ld.so.preload so it loads for ALL processes automatically.
+     * Reference: George-Seven/Termux-Proot-Utils approach.
+     */
+    private suspend fun installNetStub() {
+        val rootfsDir = File(context.filesDir, "ubuntu")
+        val libDir = File(rootfsDir, "usr/local/lib")
+        val netstubSo = File(libDir, "libnetstub.so")
+
+        // Idempotent: skip if already compiled
+        if (netstubSo.exists() && netstubSo.length() > 0) {
+            Log.i(TAG, "libnetstub.so already exists (${netstubSo.length()} bytes), ensuring ld.so.preload")
+            ensureNetstubInLdPreload(rootfsDir)
+            return
+        }
+
+        libDir.mkdirs()
+
+        // Write C source
+        val cSource = NETSTUB_C_SOURCE
+        File(rootfsDir, "tmp/netstub.c").writeText(cSource)
+
+        _state.value = InstallState.Progress(90, "네트워크 호환성 라이브러리 컴파일 중...")
+
+        try {
+            // Try compiling with available compilers (gcc → tcc → cc),
+            // install gcc as last resort if none available.
+            // -nostartfiles: no crt*.o startup code (pure .so, not executable)
+            val result = prootManager.exec(
+                "/bin/sh", "-c",
+                "if command -v gcc >/dev/null 2>&1; then " +
+                "  gcc -shared -fPIC -nostartfiles -o /usr/local/lib/libnetstub.so /tmp/netstub.c -ldl 2>&1; " +
+                "elif command -v tcc >/dev/null 2>&1; then " +
+                "  tcc -shared -o /usr/local/lib/libnetstub.so /tmp/netstub.c -ldl 2>&1; " +
+                "elif command -v cc >/dev/null 2>&1; then " +
+                "  cc -shared -fPIC -nostartfiles -o /usr/local/lib/libnetstub.so /tmp/netstub.c -ldl 2>&1; " +
+                "else " +
+                "  apt-get install -y -qq gcc 2>&1 && " +
+                "  gcc -shared -fPIC -nostartfiles -o /usr/local/lib/libnetstub.so /tmp/netstub.c -ldl 2>&1; " +
+                "fi"
+            )
+
+            if (netstubSo.exists() && netstubSo.length() > 0) {
+                netstubSo.setReadable(true, false)
+                netstubSo.setExecutable(true, false)
+                Log.i(TAG, "libnetstub.so compiled (${netstubSo.length()} bytes)")
+                ensureNetstubInLdPreload(rootfsDir)
+            } else {
+                Log.w(TAG, "libnetstub.so compilation failed (non-fatal): ${result.output.takeLast(500)}")
+            }
+        } catch (e: Exception) {
+            // Non-fatal: getifaddrs shim is a quality-of-life improvement, not critical
+            Log.w(TAG, "libnetstub.so installation failed (non-fatal): ${e.message}")
+        }
+
+        // Cleanup source file
+        File(rootfsDir, "tmp/netstub.c").delete()
+
+        _state.value = InstallState.Progress(91, "네트워크 호환성 설정 완료")
+    }
+
+    /**
+     * Ensure /usr/local/lib/libnetstub.so is registered in ld.so.preload.
+     * Preserves existing entries (e.g., /support/libdisableselinux.so).
+     * The support/ld.so.preload file is bind-mounted to /etc/ld.so.preload by ProotManager.
+     */
+    private fun ensureNetstubInLdPreload(rootfsDir: File) {
+        val netstubPath = "/usr/local/lib/libnetstub.so"
+        val ldPreloadFile = File(rootfsDir, "support/ld.so.preload")
+
+        if (!ldPreloadFile.parentFile!!.exists()) {
+            ldPreloadFile.parentFile!!.mkdirs()
+        }
+
+        if (ldPreloadFile.exists()) {
+            val content = ldPreloadFile.readText()
+            if (content.contains(netstubPath)) {
+                Log.d(TAG, "libnetstub.so already in ld.so.preload")
+                return
+            }
+            // Append on a new line, preserving existing entries
+            val newContent = content.trimEnd() + "\n" + netstubPath + "\n"
+            ldPreloadFile.writeText(newContent)
+            Log.i(TAG, "Appended libnetstub.so to existing ld.so.preload")
+        } else {
+            ldPreloadFile.writeText("$netstubPath\n")
+            Log.i(TAG, "Created ld.so.preload with libnetstub.so")
+        }
+    }
+
     private suspend fun verifyInstallation() {
         _state.value = InstallState.Progress(93, "설치 검증 중...")
 
@@ -831,6 +944,7 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
             .remove(STEP_CONFIGURED)
             .remove(STEP_SWAP_DONE)
             .remove(STEP_DROPBEAR_INSTALLED)
+            .remove(STEP_NETSTUB_INSTALLED)
             .apply()
         _state.value = InstallState.Idle
         Log.i(TAG, "Installation reset (all step markers cleared)")
@@ -850,6 +964,7 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
         private const val STEP_CONFIGURED = "step_configured"
         private const val STEP_SWAP_DONE = "step_swap_done"
         private const val STEP_DROPBEAR_INSTALLED = "step_dropbear_installed"
+        private const val STEP_NETSTUB_INSTALLED = "step_netstub_installed"
         // 3 mirror URLs for rootfs — tries in order, each with retry
         private val ROOTFS_URLS = listOf(
             "https://cloud-images.ubuntu.com/minimal/releases/noble/release/" +
@@ -885,6 +1000,254 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
                 fallbackUrl = "$PORTS_BASE/universe/d/dropbear/dropbear-bin_2020.81-5_arm64.deb"
             )
         )
+
+        /**
+         * C source for libnetstub.so — getifaddrs() LD_PRELOAD shim.
+         *
+         * On Android 11+, netlink socket bind() returns EACCES inside PRoot.
+         * This breaks getifaddrs() which is used by Python, Go, Rust, and many
+         * other languages/libraries for network interface enumeration.
+         *
+         * The shim intercepts getifaddrs() and freeifaddrs():
+         * - Tries the real getifaddrs() first via dlsym(RTLD_NEXT)
+         * - If it fails with EACCES (errno 13), falls back to:
+         *   - ioctl(SIOCGIFCONF) for IPv4 interface enumeration
+         *   - Parsing /proc/net/if_inet6 for IPv6 addresses
+         * - Builds a proper struct ifaddrs linked list
+         *
+         * Reference: George-Seven/Termux-Proot-Utils approach.
+         */
+        val NETSTUB_C_SOURCE = """
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <errno.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+/* Maximum number of interfaces we support in fallback mode */
+#define MAX_IFS 32
+
+/* Node in our synthetic ifaddrs linked list */
+struct ifa_node {
+    struct ifaddrs ifa;
+    char name[IF_NAMESIZE];
+    struct sockaddr_storage addr;
+    struct sockaddr_storage netmask;
+};
+
+static struct ifa_node *g_nodes = NULL;
+static int g_node_count = 0;
+
+/*
+ * Build a synthetic ifaddrs list using ioctl(SIOCGIFCONF) for IPv4
+ * and parsing /proc/net/if_inet6 for IPv6.
+ * Returns 0 on success, -1 on failure.
+ */
+static int fallback_getifaddrs(struct ifaddrs **ifap) {
+    int sock = -1;
+    int count = 0;
+    struct ifconf ifc;
+    char buf[sizeof(struct ifreq) * MAX_IFS];
+    struct ifa_node *nodes = NULL;
+
+    *ifap = NULL;
+
+    /* --- IPv4 via ioctl --- */
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) goto build_result;
+
+    ifc.ifc_len = sizeof(buf);
+    ifc.ifc_buf = buf;
+    if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
+        close(sock);
+        sock = -1;
+        goto try_ipv6;
+    }
+
+    int n_ifs = ifc.ifc_len / sizeof(struct ifreq);
+    if (n_ifs > MAX_IFS) n_ifs = MAX_IFS;
+
+    /* Allocate enough nodes for IPv4 + potential IPv6 entries */
+    nodes = (struct ifa_node *)calloc(MAX_IFS * 2, sizeof(struct ifa_node));
+    if (!nodes) {
+        close(sock);
+        return -1;
+    }
+
+    for (int i = 0; i < n_ifs; i++) {
+        struct ifreq *ifr = &((struct ifreq *)ifc.ifc_buf)[i];
+        struct ifa_node *node = &nodes[count];
+
+        strncpy(node->name, ifr->ifr_name, IF_NAMESIZE - 1);
+        node->name[IF_NAMESIZE - 1] = '\0';
+        node->ifa.ifa_name = node->name;
+        node->ifa.ifa_flags = 0;
+
+        /* Get flags */
+        struct ifreq flags_req;
+        strncpy(flags_req.ifr_name, ifr->ifr_name, IF_NAMESIZE - 1);
+        if (ioctl(sock, SIOCGIFFLAGS, &flags_req) == 0) {
+            node->ifa.ifa_flags = flags_req.ifr_flags;
+        }
+
+        /* Address */
+        memcpy(&node->addr, &ifr->ifr_addr, sizeof(struct sockaddr_in));
+        node->ifa.ifa_addr = (struct sockaddr *)&node->addr;
+
+        /* Netmask */
+        struct ifreq mask_req;
+        strncpy(mask_req.ifr_name, ifr->ifr_name, IF_NAMESIZE - 1);
+        if (ioctl(sock, SIOCGIFNETMASK, &mask_req) == 0) {
+            memcpy(&node->netmask, &mask_req.ifr_netmask, sizeof(struct sockaddr_in));
+            node->ifa.ifa_netmask = (struct sockaddr *)&node->netmask;
+        }
+
+        node->ifa.ifa_next = NULL;
+        count++;
+    }
+
+    close(sock);
+    sock = -1;
+
+try_ipv6:
+    /* --- IPv6 via /proc/net/if_inet6 --- */
+    {
+        FILE *f = fopen("/proc/net/if_inet6", "r");
+        if (f) {
+            if (!nodes) {
+                nodes = (struct ifa_node *)calloc(MAX_IFS * 2, sizeof(struct ifa_node));
+                if (!nodes) {
+                    fclose(f);
+                    return -1;
+                }
+            }
+
+            char line[128];
+            while (fgets(line, sizeof(line), f) && count < MAX_IFS * 2) {
+                /* Format: addr6 index prefix_len scope flags name */
+                char addr6_hex[33];
+                int index, prefix_len, scope, flags;
+                char ifname[IF_NAMESIZE];
+
+                if (sscanf(line, "%32s %x %x %x %x %15s",
+                           addr6_hex, &index, &prefix_len, &scope, &flags, ifname) != 6) {
+                    continue;
+                }
+
+                struct ifa_node *node = &nodes[count];
+                strncpy(node->name, ifname, IF_NAMESIZE - 1);
+                node->name[IF_NAMESIZE - 1] = '\0';
+                node->ifa.ifa_name = node->name;
+                node->ifa.ifa_flags = IFF_UP;
+
+                /* Parse hex IPv6 address */
+                struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&node->addr;
+                sa6->sin6_family = AF_INET6;
+                sa6->sin6_scope_id = (scope == 0x20) ? index : 0; /* link-local */
+                for (int i = 0; i < 16; i++) {
+                    unsigned int byte_val;
+                    char hex[3] = { addr6_hex[i*2], addr6_hex[i*2+1], '\0' };
+                    sscanf(hex, "%x", &byte_val);
+                    sa6->sin6_addr.s6_addr[i] = (unsigned char)byte_val;
+                }
+                node->ifa.ifa_addr = (struct sockaddr *)&node->addr;
+
+                /* Build prefix mask */
+                struct sockaddr_in6 *mask6 = (struct sockaddr_in6 *)&node->netmask;
+                mask6->sin6_family = AF_INET6;
+                for (int i = 0; i < 16; i++) {
+                    int bits = prefix_len - i * 8;
+                    if (bits >= 8) mask6->sin6_addr.s6_addr[i] = 0xFF;
+                    else if (bits > 0) mask6->sin6_addr.s6_addr[i] = (0xFF << (8 - bits)) & 0xFF;
+                    else mask6->sin6_addr.s6_addr[i] = 0;
+                }
+                node->ifa.ifa_netmask = (struct sockaddr *)&node->netmask;
+
+                node->ifa.ifa_next = NULL;
+                count++;
+            }
+            fclose(f);
+        }
+    }
+
+build_result:
+    if (sock >= 0) close(sock);
+
+    if (count == 0) {
+        free(nodes);
+        /* Return empty list (not an error — just no interfaces found) */
+        *ifap = NULL;
+        /* Store for freeifaddrs */
+        g_nodes = NULL;
+        g_node_count = 0;
+        return 0;
+    }
+
+    /* Link the nodes */
+    for (int i = 0; i < count - 1; i++) {
+        nodes[i].ifa.ifa_next = &nodes[i + 1].ifa;
+    }
+    nodes[count - 1].ifa.ifa_next = NULL;
+
+    *ifap = &nodes[0].ifa;
+
+    /* Store reference for freeifaddrs */
+    g_nodes = nodes;
+    g_node_count = count;
+
+    return 0;
+}
+
+/*
+ * Intercepted getifaddrs — tries real function first,
+ * falls back on EACCES (Android 11+ netlink restriction).
+ */
+int getifaddrs(struct ifaddrs **ifap) {
+    static int (*real_getifaddrs)(struct ifaddrs **) = NULL;
+    if (!real_getifaddrs) {
+        real_getifaddrs = (int (*)(struct ifaddrs **))dlsym(RTLD_NEXT, "getifaddrs");
+    }
+
+    if (real_getifaddrs) {
+        int ret = real_getifaddrs(ifap);
+        if (ret == 0) return 0;
+        /* Only fall back on EACCES — other errors pass through */
+        if (errno != EACCES) return ret;
+    }
+
+    return fallback_getifaddrs(ifap);
+}
+
+/*
+ * Intercepted freeifaddrs — handles both real and synthetic lists.
+ */
+void freeifaddrs(struct ifaddrs *ifa) {
+    /* Check if this is our synthetic list */
+    if (g_nodes && ifa == &g_nodes[0].ifa) {
+        free(g_nodes);
+        g_nodes = NULL;
+        g_node_count = 0;
+        return;
+    }
+
+    /* Not ours — call the real freeifaddrs */
+    static void (*real_freeifaddrs)(struct ifaddrs *) = NULL;
+    if (!real_freeifaddrs) {
+        real_freeifaddrs = (void (*)(struct ifaddrs *))dlsym(RTLD_NEXT, "freeifaddrs");
+    }
+    if (real_freeifaddrs) {
+        real_freeifaddrs(ifa);
+    }
+}
+""".trimIndent()
 
         fun generatePassword(length: Int = 12): String {
             val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

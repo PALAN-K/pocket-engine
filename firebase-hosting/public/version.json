@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "url": "https://pub-832ccadf097e4bf687650db1e57df66b.r2.dev/pocketserver-engine.apk",
-  "changelog": "Initial release"
+  "changelog": "Fix: Node.js/Python/Go networkInterfaces crash on Android 11+ (libnetstub + net-fix.js global)"
 }

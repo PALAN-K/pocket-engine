@@ -1,6 +1,7 @@
 package kr.co.palank.pocketserver.ui.setup
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -507,11 +508,21 @@ private fun CompletedPhase(
         Spacer(modifier = Modifier.height(32.dp))
 
         // PocketMonitor 설치 안내 카드
+        val monitorPackage = "kr.co.palank.pocketmonitor"
+        val isMonitorInstalled = remember {
+            try {
+                context.packageManager.getPackageInfo(monitorPackage, 0)
+                true
+            } catch (e: PackageManager.NameNotFoundException) {
+                false
+            }
+        }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = colorScheme.primaryContainer,
+                containerColor = if (isMonitorInstalled) extColors.statusGreenBg else extColors.cardBackground,
             ),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
@@ -519,38 +530,72 @@ private fun CompletedPhase(
                 modifier = Modifier.padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = "PocketMonitor를 설치하면\n매일 서버 상태를 확인하고\n안전하게 관리할 수 있습니다",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = colorScheme.onPrimaryContainer,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 22.sp,
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedButton(
-                    onClick = {
-                        val intent = Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse("https://play.google.com/store/apps/details?id=kr.co.palank.pocketmonitor"),
-                        )
-                        context.startActivity(intent)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = colorScheme.primary,
-                    ),
-                ) {
+                if (isMonitorInstalled) {
                     Text(
-                        text = "Play Store에서 설치",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
+                        text = "✓ PocketMonitor 연결됨",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = extColors.statusGreen,
+                        textAlign = TextAlign.Center,
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "PocketMonitor에서 서버 상태를\n확인하고 관리할 수 있습니다",
+                        fontSize = 14.sp,
+                        color = extColors.textSecondary,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp,
+                    )
+                } else {
+                    Text(
+                        text = "PocketMonitor",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "설치하면 매일 서버 상태를 확인하고\n안전하게 관리할 수 있습니다",
+                        fontSize = 14.sp,
+                        color = extColors.textSecondary,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp,
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            try {
+                                val marketIntent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("market://details?id=$monitorPackage"),
+                                )
+                                context.startActivity(marketIntent)
+                            } catch (e: Exception) {
+                                val browserIntent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://play.google.com/store/apps/details?id=$monitorPackage"),
+                                )
+                                context.startActivity(browserIntent)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(
+                            text = "Play Store에서 설치",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }
@@ -695,6 +740,22 @@ private fun CompletedPhase(
             color = extColors.textSecondary,
             textAlign = TextAlign.Center,
             lineHeight = 18.sp,
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        val engineVersionName = remember {
+            try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+            } catch (e: Exception) {
+                "unknown"
+            }
+        }
+        Text(
+            text = "PocketEngine v$engineVersionName",
+            fontSize = 12.sp,
+            color = extColors.textSecondary.copy(alpha = 0.5f),
+            textAlign = TextAlign.Center,
         )
 
         Spacer(modifier = Modifier.height(40.dp))
