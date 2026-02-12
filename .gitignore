@@ -69,6 +69,11 @@ write_im.js
 out_lines.json
 src_lines.json
 transform_state.json
+test_net.sh
+start_openclaw.sh
+
+# External project data (not part of PocketServer)
+notebookserver_openclaw/
 
 # OS
 Thumbs.db
