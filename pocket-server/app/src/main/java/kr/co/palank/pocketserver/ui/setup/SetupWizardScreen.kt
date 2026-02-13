@@ -3,6 +3,7 @@ package kr.co.palank.pocketserver.ui.setup
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -25,10 +26,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -53,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import kr.co.palank.pocketserver.linux.InstallState
 import kr.co.palank.pocketserver.linux.SessionManager
 import kr.co.palank.pocketserver.monitor.NetworkMonitor
+import kr.co.palank.pocketserver.service.ServerForegroundService
 import kr.co.palank.pocketserver.ui.theme.PocketServerExtendedTheme
 import kr.co.palank.pocketserver.util.DeviceSpec
 
@@ -680,7 +685,53 @@ private fun CompletedPhase(
             }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Phantom process killer warning (Android 12+)
+        val isPhantomKillerEnabled = remember {
+            Build.VERSION.SDK_INT >= 31 &&
+                ServerForegroundService.isPhantomProcessKillerEnabled(context)
+        }
+        if (isPhantomKillerEnabled) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = extColors.statusAmberBg,
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = extColors.statusAmber,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "팬텀 프로세스 킬러 활성화됨",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = extColors.statusAmber,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Android가 서버 프로세스를 자동 종료할 수 있습니다. 백그라운드 실행 설정에서 비활성화해 주세요.",
+                            fontSize = 13.sp,
+                            color = colorScheme.onSurface,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         if (!optimizationGuideDone) {
             // 최초: 백그라운드 설정으로 안내

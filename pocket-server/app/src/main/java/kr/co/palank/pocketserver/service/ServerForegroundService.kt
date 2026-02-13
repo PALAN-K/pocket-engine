@@ -289,5 +289,15 @@ class ServerForegroundService : Service() {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             return !pm.isIgnoringBatteryOptimizations(context.packageName)
         }
+
+        /** Check if Android 12+ phantom process killer is enabled (true = enabled = bad for server) */
+        fun isPhantomProcessKillerEnabled(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < 31) return false
+            val value = Settings.Global.getString(
+                context.contentResolver,
+                "settings_enable_monitor_phantom_procs"
+            )
+            return value != "false" // null (default) = enabled, "true" = enabled
+        }
     }
 }

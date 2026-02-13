@@ -18,8 +18,9 @@ data class OptimizationStep(
 object ManufacturerOptimizationHelper {
 
     fun getRequiredSteps(context: Context): List<OptimizationStep> {
+        val phantomStep = getPhantomProcessStep(context)
         val manufacturer = Build.MANUFACTURER.lowercase(Locale.ROOT)
-        return when {
+        val manufacturerSteps = when {
             manufacturer.contains("samsung") -> samsungSteps(context)
             manufacturer.contains("xiaomi") ||
             manufacturer.contains("redmi") ||
@@ -32,6 +33,28 @@ object ManufacturerOptimizationHelper {
             manufacturer.contains("vivo") -> vivoSteps(context)
             else -> listOf(genericDozeStep(context))
         }
+        return if (phantomStep != null) {
+            listOf(phantomStep) + manufacturerSteps
+        } else {
+            manufacturerSteps
+        }
+    }
+
+    fun getPhantomProcessStep(context: Context): OptimizationStep? {
+        if (Build.VERSION.SDK_INT < 31) return null
+        val value = Settings.Global.getString(
+            context.contentResolver,
+            "settings_enable_monitor_phantom_procs"
+        )
+        if (value == "false") return null
+        return OptimizationStep(
+            title = "팬텀 프로세스 모니터링 비활성화",
+            description = "Android 12 이상에서는 백그라운드 자식 프로세스를 자동으로 종료합니다. 서버가 안정적으로 동작하려면 이 설정을 꺼야 합니다.",
+            intents = listOf(
+                Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            ),
+            userInstructions = "1. 개발자 옵션이 활성화되어 있지 않다면:\n   설정 → 휴대전화 정보 → 빌드번호를 7번 탭\n2. 설정 → 개발자 옵션 → '팬텀 프로세스 모니터링' 비활성화"
+        )
     }
 
     fun launchIntent(context: Context, intents: List<Intent>): Boolean {
