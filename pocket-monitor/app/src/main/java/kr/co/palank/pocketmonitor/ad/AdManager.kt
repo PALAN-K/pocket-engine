@@ -42,7 +42,7 @@ class AppOpenAdManager : Application.ActivityLifecycleCallbacks, DefaultLifecycl
 
         AppOpenAd.load(
             activity,
-            TEST_APP_OPEN_AD_ID,
+            APP_OPEN_AD_ID,
             AdRequest.Builder().build(),
             object : AppOpenAd.AppOpenAdLoadCallback() {
                 override fun onAdLoaded(ad: AppOpenAd) {
@@ -120,7 +120,7 @@ class AppOpenAdManager : Application.ActivityLifecycleCallbacks, DefaultLifecycl
 
     companion object {
         private const val TAG = "AppOpenAdManager"
-        private const val TEST_APP_OPEN_AD_ID = "ca-app-pub-3940256099942544/9257395921"
+        private const val APP_OPEN_AD_ID = "ca-app-pub-8839719247481278/8357110235"
     }
 }
 
@@ -131,7 +131,7 @@ fun BannerAd(modifier: Modifier = Modifier) {
     val adView = remember {
         AdView(context).apply {
             setAdSize(AdSize.BANNER)
-            adUnitId = TEST_BANNER_AD_ID
+            adUnitId = BANNER_AD_ID
             loadAd(AdRequest.Builder().build())
         }
     }
@@ -151,4 +151,4 @@ fun BannerAd(modifier: Modifier = Modifier) {
     AndroidView(factory = { adView }, modifier = modifier)
 }
 
-private const val TEST_BANNER_AD_ID = "ca-app-pub-3940256099942544/9214589741"
+private const val BANNER_AD_ID = "ca-app-pub-8839719247481278/7965286044"

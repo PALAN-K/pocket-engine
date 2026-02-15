@@ -79,40 +79,68 @@ os.networkInterfaces = function() {
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
 
         val config = JSONObject().apply {
-            put("llm", JSONObject().apply {
-                put("provider", "gemini")
-                put("api_key", apiKey)
-                put("model", "gemini-2.0-flash")
+            put("gateway", JSONObject().apply {
+                put("mode", "local")
+            })
+            put("agents", JSONObject().apply {
+                put("defaults", JSONObject().apply {
+                    put("model", JSONObject().apply {
+                        put("primary", "google/gemini-2.5-flash")
+                        put("fallbacks", org.json.JSONArray().apply {
+                            put("google/gemma-3-27b-it")
+                        })
+                    })
+                })
             })
             put("channels", JSONObject().apply {
                 put("telegram", JSONObject().apply {
                     put("enabled", true)
-                    put("token", telegramToken)
+                    put("botToken", telegramToken)
                 })
             })
         }
 
-        val configFile = File(rootfsPath, "root/.openclaw/config.json")
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
         configFile.parentFile?.mkdirs()
         configFile.writeText(config.toString(2))
 
-        Log.i(TAG, "OpenClaw configured")
+        // GEMINI_API_KEY 환경변수를 profile에 설정 (OpenClaw은 env var로 인증)
+        val envFile = File(rootfsPath, "root/.openclaw/.env")
+        envFile.writeText("GEMINI_API_KEY=$apiKey\n")
+
+        Log.i(TAG, "OpenClaw configured (openclaw.json + .env)")
         Unit
     }
 
     override suspend fun start(): Boolean = withContext(Dispatchers.IO) {
+        // 기존 프로세스 정리 후 시작 (중복 방지)
+        prootManager.exec(
+            "/bin/bash", "-c",
+            "if [ -f $pidFile ]; then kill \$(cat $pidFile) 2>/dev/null; rm -f $pidFile; fi; " +
+            "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1"
+        )
+        // config + env 존재 확인
+        val configExists = File(rootfsPath, "root/.openclaw/openclaw.json").exists()
+        if (!configExists) {
+            Log.w(TAG, "OpenClaw config not found, skipping start")
+            return@withContext false
+        }
         val result = prootManager.exec(
             "/bin/bash", "-c",
-            "NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js' nohup openclaw start > /tmp/openclaw.log 2>&1 & echo \$! > $pidFile"
+            "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
+            "NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js' nohup openclaw gateway run > /tmp/openclaw.log 2>&1 & echo \$! > $pidFile; " +
+            "sleep 5; [ -f $pidFile ] && kill -0 \$(cat $pidFile) 2>/dev/null && echo OK || echo FAIL"
         )
-        Log.i(TAG, "OpenClaw start: code=${result.exitCode}")
-        result.isSuccess
+        val started = result.output.trim().endsWith("OK")
+        Log.i(TAG, "OpenClaw start: code=${result.exitCode}, verified=$started")
+        started
     }
 
     override suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
         val result = prootManager.exec(
             "/bin/bash", "-c",
-            "if [ -f $pidFile ]; then kill \$(cat $pidFile) 2>/dev/null; rm -f $pidFile; fi"
+            "if [ -f $pidFile ]; then kill \$(cat $pidFile) 2>/dev/null; rm -f $pidFile; fi; " +
+            "pkill -f 'openclaw gateway run' 2>/dev/null"
         )
         Log.i(TAG, "OpenClaw stop: code=${result.exitCode}")
         true

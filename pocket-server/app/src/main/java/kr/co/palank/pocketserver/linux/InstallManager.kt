@@ -140,8 +140,13 @@ class InstallManager(private val context: Context) {
                 markStep(STEP_NETSTUB_INSTALLED)
             }
 
-            // Step 7: 최종 검증 (92-100%)
-            _state.value = InstallState.Progress(92, "설치 검증 중...")
+            // 비밀번호 설정은 step 체크와 무관하게 매번 실행
+            // rootfs 재추출 시 /etc/shadow가 초기화되므로 항상 재설정 필요
+            _state.value = InstallState.Progress(92, "SSH 비밀번호 설정 중...")
+            ensureSshPassword()
+
+            // Step 7: 최종 검증 (95-100%)
+            _state.value = InstallState.Progress(95, "설치 검증 중...")
             verifyInstallation()
 
             prefs.edit().putBoolean(KEY_INSTALLED, true).apply()
@@ -384,17 +389,23 @@ class InstallManager(private val context: Context) {
         )
         Log.i(TAG, "APT sandbox config written")
 
-        _state.value = InstallState.Progress(67, "사용자 계정 생성 중...")
-        val password = generatePassword()
+        // 비밀번호 설정은 ensureSshPassword()에서 처리 (매 설치 시 실행)
+
+        Log.i(TAG, "System configured")
+    }
+
+    /**
+     * SSH 비밀번호를 항상 설정/재설정한다.
+     * rootfs가 재추출되면 /etc/shadow가 초기화되므로 step 체크와 무관하게 매번 실행.
+     */
+    private suspend fun ensureSshPassword() {
+        val password = sshPassword ?: generatePassword()
         prefs.edit().putString(KEY_SSH_PASSWORD, password).apply()
 
-        // PRoot에서는 fake root이므로 root 비밀번호를 설정하여 SSH 접속
-        // Dropbear의 setuid()/initgroups()가 PRoot에서 실패하므로 root 로그인 사용
         prootManager.exec("/bin/sh", "-c",
             "echo 'root:$password' | chpasswd"
         )
 
-        // pocketserver 유저도 생성 (향후 사용 가능)
         prootManager.exec("/bin/sh", "-c",
             "id pocketserver >/dev/null 2>&1 || useradd -m -s /bin/bash pocketserver"
         )
@@ -402,25 +413,21 @@ class InstallManager(private val context: Context) {
             "echo 'pocketserver:$password' | chpasswd"
         )
 
-        // Copy shadow password hashes into /etc/passwd for non-root Dropbear compatibility.
-        // When Dropbear runs without -0 (getuid()!=0), getspnam() may fail,
-        // so it falls back to /etc/passwd — if password field is "x", auth fails.
-        // This ensures auth works in both -0 and non -0 modes.
+        // Copy shadow hashes into /etc/passwd for non-root SSH compatibility
         prootManager.exec("/bin/sh", "-c",
             "HASH=\$(grep '^root:' /etc/shadow | cut -d: -f2) && " +
-            "sed -i \"s|^root:x:|root:\$HASH:|\" /etc/passwd"
+            "sed -i \"s|^root:[^:]*:|root:\$HASH:|\" /etc/passwd"
         )
         prootManager.exec("/bin/sh", "-c",
             "HASH=\$(grep '^pocketserver:' /etc/shadow | cut -d: -f2) && " +
-            "sed -i \"s|^pocketserver:x:|pocketserver:\$HASH:|\" /etc/passwd"
+            "sed -i \"s|^pocketserver:[^:]*:|pocketserver:\$HASH:|\" /etc/passwd"
         )
 
-        // Ensure /root has correct permissions and .bashrc
         prootManager.exec("/bin/sh", "-c",
             "chmod 700 /root && test -f /root/.bashrc || echo '# .bashrc' > /root/.bashrc"
         )
 
-        Log.i(TAG, "System configured, root and 'pocketserver' passwords set (shadow+passwd)")
+        Log.i(TAG, "SSH passwords ensured (root + pocketserver)")
     }
 
     private suspend fun setupSwap() {

@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "url": "https://pub-832ccadf097e4bf687650db1e57df66b.r2.dev/pocketserver-engine.apk",
-  "changelog": "Fix: Android 11+ networkInterfaces crash (libnetstub + net-fix.js), phantom process killer mitigation for improved background stability"
+  "changelog": "AI 비서 서비스 스토어 추가 (PicoClaw/OpenClaw 원클릭 설치)"
 }

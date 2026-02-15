@@ -59,7 +59,7 @@ class HistoryTracker(private val deviceMonitor: DeviceMonitor) {
             if (entries.size >= MAX_ENTRIES) {
                 entries.removeFirst()
             }
-            entries.addLast(entry)
+            entries.add(entry)
             _history.value = entries.toList()
         }
     }

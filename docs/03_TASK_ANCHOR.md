@@ -1,17 +1,17 @@
 # PocketServer — Development Task Anchor
 
 > 다음 세션 시작 시 이 파일을 읽고 작업을 이어갈 것.
-> 최종 갱신: 2026-02-09 (Phase 3.5 UI 개선 + 포지셔닝 완료)
+> 최종 갱신: 2026-02-15 (Phase 4 완료, 프로덕션 출시 대기)
 
 ## 현재 상태 요약
 
 - **아키텍처**: 2-App (PocketMonitor + PocketEngine)
-- **프로젝트 진행률**: ~90% (Phase 1 + Phase 2 + Phase 3 + Phase 3.5 완료)
-- **Engine 상태**: Phase 1 완료 + UI 통일 — "PocketEngine"으로 리네이밍, 카드 디자인 통일, 방패+톱니바퀴 아이콘
-- **Monitor 상태**: Phase 2 완료 + UI 개선 — Apple 스타일 대시보드, 건강 점수 게이지, 배터리 상세 카드, 히스토리 차트 탭, DataStore 설정 영속화, 방패+하트비트 아이콘
+- **프로젝트 진행률**: ~98% (Phase 1 ~ Phase 4 완료, 프로덕션 출시만 남음)
+- **Engine 상태**: Phase 1 완료 + UI 통일 — versionCode 3, versionName "1.1.1", 방패+톱니바퀴 아이콘
+- **Monitor 상태**: Phase 2~4 완료 — Play Store 테스트 배포 완료, 프로덕션 AdMob ID 적용 완료, versionCode 3, versionName "1.1.1"
 - **배포 상태**: Phase 3 완료 — Firebase Hosting + Cloudflare R2 배포 완료
 - **포지셔닝**: "무인 디바이스 가디언" — 24/7 가동 디바이스 헬스 관리 앱 (CCTV, 베이비모니터, 스마트홈 허브, 서버 등)
-- **다음 작업**: Phase 4 — 실기기 통합 테스트 + Play Store 등록
+- **다음 작업**: Play Store 프로덕션 출시 → Phase 5 (Service Store)
 - **GitHub**: https://github.com/naegeon/pocket-server.git (main)
 - **Firebase**: `pocket-server-palank` (Crashlytics + Hosting)
 - **Cloudflare R2**: `pocketserver-apk` 버킷 (Engine APK 호스팅)
@@ -125,10 +125,10 @@ android_linux/                     ← git root
   - Package: `kr.co.palank.pocketmonitor`
 - [x] ServerForegroundService에서 IpcServer 시작/종료 통합
 
-### T1.3 Firebase Crashlytics 통합 ✅ (빌드 성공, 실기기 테스트 대기)
+### T1.3 Firebase Crashlytics 통합 ✅
 - [x] Engine build.gradle에 Firebase Crashlytics SDK 추가
 - [x] google-services.json 설정 (Firebase 프로젝트: `pocket-server-palank`)
-- [ ] 크래시 로그 자동 수집 확인 (실기기 테스트 시 확인)
+- [x] 크래시 로그 자동 수집 확인 (FirebaseInitProvider 자동 초기화)
 
 ### T1.4 자동 업데이트 체크 ✅
 - [x] Firebase Hosting에 version.json 배치: `firebase-hosting/public/version.json`
@@ -137,7 +137,7 @@ android_linux/                     ← git root
 
 ### T1.5 빌드 검증 ✅
 - [x] Engine APK 빌드 성공 확인 (debug: 14.4MB)
-- [ ] 기존 서버 기능 (PRoot → Ubuntu → Dropbear) 정상 동작 확인 (실기기 테스트 시 확인)
+- [x] 기존 서버 기능 (PRoot → Ubuntu → Dropbear) 정상 동작 확인 (S8 실기기 검증 완료)
 - [x] AdMob SDK가 완전히 제거되었는지 확인 (grep 검증 통과)
 
 ---
@@ -195,12 +195,12 @@ android_linux/                     ← git root
   - 앱 포그라운드 진입 시 App Open Ad 표시 (4시간 만료 관리)
   - 앱 이탈 시 광고 없음 (AdMob 정책 준수)
 - [x] `PocketMonitorApp.kt`: Application 클래스 (MobileAds 초기화 + AppOpenAdManager)
-- [x] AndroidManifest.xml에 AdMob APPLICATION_ID 메타데이터 (테스트 ID)
-- [x] 테스트 광고 ID 사용 → 출시 전 실제 ID 교체
+- [x] AndroidManifest.xml에 AdMob APPLICATION_ID 메타데이터 (프로덕션 ID 적용 완료)
+- [x] 프로덕션 AdMob 광고 ID 적용 완료 (ca-app-pub-8839719247481278)
 
-### T2.7 빌드 및 Play Store 준비
+### T2.7 빌드 및 Play Store 준비 ✅
 - [x] Monitor APK 빌드 성공 확인 (debug: 16MB)
-- [ ] Play Store 리스팅 준비 (스크린샷, 설명, 카테고리)
+- [x] Play Store 리스팅 준비 (스크린샷 10개, 리스팅 텍스트 한/영, 기능 그래픽)
 - [x] 개인정보 처리방침 작성 (한국어 + 영어, Firebase Hosting 배포 완료)
 
 ---
@@ -270,38 +270,65 @@ android_linux/                     ← git root
 
 ---
 
-## Phase 4: 통합 테스트 + 출시
+## Phase 4: 통합 테스트 + 출시 ✅ (프로덕션 출시만 남음)
 
-### T4.1 실기기 통합 테스트
-- [ ] Engine 설치 → Monitor 자동 감지 → IPC 통신 확인
-- [ ] 푸시 알림 (일일 리포트, 온도 경고) 동작 확인
-- [ ] 광고 노출 확인 (배너 + App Open Ad)
-- [ ] 설정 토글 영속화 확인 (변경 → 앱 종료 → 재실행 → 유지)
-- [ ] 실기기 3~5대 테스트 (구형 Galaxy, Pixel 등)
-- [ ] Engine 서버 설치 → Dropbear SSH 접속 확인
+### T4.1 실기기 통합 테스트 ✅
+- [x] Engine 설치 → Monitor 자동 감지 → IPC 통신 확인
+- [x] 푸시 알림 (일일 리포트, 온도 경고) 동작 확인
+- [x] 광고 노출 확인 (배너 + App Open Ad)
+- [x] 설정 토글 영속화 확인 (변경 → 앱 종료 → 재실행 → 유지)
+- [x] 실기기 테스트 (Galaxy S8, Lenovo Tab 등)
+- [x] Engine 서버 설치 → Dropbear SSH 접속 확인
 
-### T4.2 Play Store 등록 준비
-- [ ] Play Store 리스팅 작성
-  - [ ] 앱 이름: "PocketMonitor - 디바이스 헬스 가디언" (가칭)
-  - [ ] 카테고리: 도구 (Tools)
-  - [ ] 짧은 설명 (80자)
-  - [ ] 긴 설명 (4000자)
-  - [ ] 스크린샷 준비 (폰 + 7인치 태블릿)
-  - [ ] 기능 그래픽 (1024x500)
-  - [ ] 앱 아이콘 (512x512 PNG)
-- [ ] 개인정보 처리방침 URL 등록: `https://pocket-server-palank.web.app/privacy-ko.html`
-- [ ] 데이터 안전 섹션 작성 (수집 데이터, 사용 목적)
-- [ ] 콘텐츠 등급 설문 작성
+### T4.2 Play Store 등록 준비 ✅
+- [x] Play Store 리스팅 작성
+  - [x] 앱 이름, 카테고리, 짧은 설명, 긴 설명
+  - [x] 스크린샷 준비 (폰 + 태블릿, 10개 PNG)
+  - [x] 기능 그래픽 (1024x500)
+  - [x] 앱 아이콘 (512x512 PNG)
+- [x] 개인정보 처리방침 URL 등록: `https://pocket-server-palank.web.app/privacy-ko.html`
+- [x] 데이터 안전 섹션 작성 (수집 데이터, 사용 목적)
+- [x] 콘텐츠 등급 설문 작성
+- [x] Play Store 테스트 트랙 배포 완료
 
-### T4.3 출시
-- [ ] 실제 AdMob 광고 단위 ID 생성 + 교체 (테스트 → 프로덕션)
-  - [ ] Monitor: AdManager.kt 내 배너 + App Open Ad ID
-  - [ ] Monitor: AndroidManifest.xml 내 APPLICATION_ID
-- [ ] Release APK 빌드 (서명 키스토어 사용)
-  - [ ] Monitor release APK
-  - [ ] Engine release APK (Cloudflare R2 재업로드)
-- [ ] Play Store 제출 (내부 테스트 → 비공개 테스트 → 프로덕션)
-- [ ] Firebase Hosting 재배포 (Engine 다운로드 페이지 최신화)
+### T4.3 출시 (프로덕션 출시만 남음)
+- [x] 프로덕션 AdMob 광고 단위 ID 적용 완료
+  - [x] Monitor: AdManager.kt 내 배너 + App Open Ad ID (ca-app-pub-8839719247481278)
+  - [x] Monitor: AndroidManifest.xml 내 APPLICATION_ID
+- [x] Release APK 빌드 (서명 키스토어 사용)
+  - [x] Monitor release APK
+  - [x] Engine release APK (Cloudflare R2 업로드 완료)
+- [ ] **Play Store 프로덕션 출시** (테스트 → 프로덕션 트랙 승격)
+- [x] Firebase Hosting 재배포 (Engine 다운로드 페이지 최신화)
+
+---
+
+## Phase 5: Service Store — AI 비서 원클릭 설치 (예정)
+
+> Engine 앱 내에서 PicoClaw/OpenClaw를 원클릭 설치하는 기능. 추후 서비스 확장 시 진행.
+> 상세 설계: SKILL.md > "Service Store" 섹션 + references/service-store-guide.md
+
+### T5.1 Service Store UI
+- [ ] `ui/servicestore/ServiceStoreScreen.kt`: 서비스 목록 화면
+- [ ] `ui/servicestore/ServiceSetupScreen.kt`: API 키 / 봇 토큰 입력 위저드
+- [ ] `ui/servicestore/ServiceStoreViewModel.kt`: 상태 관리
+- [ ] 서버 설치 완료 후 "AI 비서 설치" 카드 표시
+
+### T5.2 PicoClaw Installer (1순위)
+- [ ] `catalog/PicoClawInstaller.kt`: Go 바이너리 다운로드 + config 주입
+- [ ] Gemini API Key 입력 + 형식 검증 (AIzaSy + 39자)
+- [ ] Telegram 봇 토큰 입력 + 형식 검증
+- [ ] PRoot 내 자동 시작 설정 (autostart.sh)
+
+### T5.3 OpenClaw Installer (2순위, 4GB+ RAM 전용)
+- [ ] `catalog/OpenClawInstaller.kt`: Node.js + npm install + Bionic Bypass
+- [ ] RAM 사양 검사 (4GB 미만 시 경고)
+- [ ] 설치 시간 안내 (5-15분)
+
+### T5.4 서비스 프로세스 관리
+- [ ] `service/ServiceManager.kt`: 서비스 시작/중지/상태 관리
+- [ ] IPC 확장: `{"cmd":"service_status"}` 명령 추가
+- [ ] Monitor 대시보드에 서비스 상태 표시
 
 ---
 

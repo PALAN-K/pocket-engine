@@ -106,12 +106,28 @@ class ServerForegroundService : Service() {
                     is ServerState.Idle -> "서버 대기 중" to "시작 버튼을 눌러주세요"
                     is ServerState.Installing -> "서버 설치 중" to "잠시만 기다려주세요..."
                     is ServerState.Starting -> "서버 시작 중" to "SSH 서버를 준비하고 있습니다"
-                    is ServerState.Running -> "서버 실행 중" to "SSH 포트 2022 | 정상 동작"
+                    is ServerState.Running -> {
+                        // SSH 서버가 올라온 후 설치된 서비스(PicoClaw 등) 자동 시작
+                        autoStartInstalledServices()
+                        "서버 실행 중" to "SSH 포트 2022 | 정상 동작"
+                    }
                     is ServerState.Stopping -> "서버 중지 중" to "서버를 안전하게 종료하고 있습니다"
                     is ServerState.Stopped -> "서버 중지됨" to "서버가 중지되었습니다"
                     is ServerState.Error -> "오류 발생" to state.message
                 }
                 updateNotification(title, content)
+            }
+        }
+    }
+
+    private fun autoStartInstalledServices() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val sm = ServiceManager(this@ServerForegroundService)
+                sm.startAllInstalled()
+                Log.i(TAG, "Auto-started installed services")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to auto-start services", e)
             }
         }
     }
