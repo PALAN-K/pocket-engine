@@ -32,6 +32,9 @@ import kr.co.palank.pocketserver.linux.SessionManager
 import kr.co.palank.pocketserver.manufacturer.OptimizationGuideScreen
 import kr.co.palank.pocketserver.monitor.NetworkMonitor
 import kr.co.palank.pocketserver.service.ServerForegroundService
+import kr.co.palank.pocketserver.ui.servicestore.ServiceSetupScreen
+import kr.co.palank.pocketserver.ui.servicestore.ServiceStoreScreen
+import kr.co.palank.pocketserver.ui.servicestore.ServiceStoreViewModel
 import kr.co.palank.pocketserver.ui.setup.SetupWizardScreen
 import kr.co.palank.pocketserver.ui.theme.PocketServerTheme
 import kr.co.palank.pocketserver.util.SpecChecker
@@ -78,6 +81,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val serviceStoreViewModel = remember { ServiceStoreViewModel(application) }
+
                 val prefs = remember {
                     this@MainActivity.getSharedPreferences("pocketserver_prefs", Context.MODE_PRIVATE)
                 }
@@ -108,6 +113,9 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToOptimizationGuide = {
                                     currentScreen = "optimization_guide"
                                 },
+                                onNavigateToServiceStore = {
+                                    currentScreen = "service_store"
+                                },
                             )
 
                             "optimization_guide" -> OptimizationGuideScreen(
@@ -116,6 +124,20 @@ class MainActivity : ComponentActivity() {
                                     prefs.edit().putBoolean("optimization_guide_done", true).apply()
                                     currentScreen = "setup"
                                 },
+                            )
+
+                            "service_store" -> ServiceStoreScreen(
+                                viewModel = serviceStoreViewModel,
+                                onStartSetup = { serviceId ->
+                                    serviceStoreViewModel.startSetup(serviceId)
+                                    currentScreen = "service_setup"
+                                },
+                                onBack = { currentScreen = "setup" },
+                            )
+
+                            "service_setup" -> ServiceSetupScreen(
+                                viewModel = serviceStoreViewModel,
+                                onComplete = { currentScreen = "service_store" },
                             )
                         }
                     }

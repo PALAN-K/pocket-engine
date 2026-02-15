@@ -127,6 +127,7 @@ kr.co.palank.pocketserver/
 | Signing keystore, app signing | [signing-keystore.md](references/signing-keystore.md) |
 | Build, ADB, device testing | [device-testing.md](references/device-testing.md) |
 | Deployment, release, R2, Firebase | [deployment-guide.md](references/deployment-guide.md) |
+| Service Store, PicoClaw, OpenClaw | [service-store-guide.md](references/service-store-guide.md) |
 
 ## IPC Protocol v1.0 (LocalSocket)
 
@@ -195,6 +196,91 @@ Engine → Monitor:
 - **Firebase Crashlytics**: 크래시 자동 수집 (사이드로드 앱 디버깅 필수)
 - **자동 업데이트 체크**: 앱 실행 시 Firebase Hosting의 version.json 확인 → 배너 표시
 
+## Service Store (AI 비서 원클릭 설치) — Phase 5
+
+### 개요
+Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하는 기능.
+서버 설치 완료 후 선택적으로 제공. "마켓플레이스"가 아닌 opinionated 추천 방식.
+
+### 지원 서비스
+
+| 서비스 | 타입 | 크기 | RAM | 설치 시간 | 인증 | 우선순위 |
+|--------|------|------|-----|-----------|------|----------|
+| PicoClaw | Go single binary | ~15MB | <10MB | 10초 | Gemini API Key | **1순위** |
+| OpenClaw | Node.js 앱 | ~500MB | 2GB+ | 5-15분 | Gemini API Key | 2순위 |
+
+### PicoClaw 상세
+- 출처: https://picoclaw.ai/docs, https://github.com/sipeed/picoclaw
+- Go 네이티브 ARM64 바이너리 — 의존성 제로
+- 설치: `curl -L -o /usr/local/bin/picoclaw <release_url> && chmod +x`
+- Config: `~/.picoclaw/config.json`
+- 채널: Telegram, Discord, QQ 지원
+- 구형폰(3GB RAM)에서 완벽 동작
+
+### OpenClaw on PRoot
+- 출처: https://docs.openclaw.ai
+- Node.js 22.12+ 필수 (apt install)
+- npm install 시 ARM64에서 5-15분 소요
+- **Bionic Bypass 필수**: PRoot 내 os.networkInterfaces() 크래시 방지
+  - 참고: https://sagartamang.com/blog/openclaw-on-android-termux
+- RAM 2-4GB 필요 — 구형폰 3GB에서는 불안정
+- 4GB+ RAM 기기 전용 "고급" 옵션으로 배치
+
+### Gemini API Key
+- 출처: https://ai.google.dev/gemini-api/docs/api-key
+- 형식: `AIzaSy` 접두사 + 총 39자 (영숫자 + `_` + `-`)
+- 발급 URL: `https://aistudio.google.com/app/apikey`
+- 검증: `GET https://generativelanguage.googleapis.com/v1beta/models?key={KEY}` → 200 OK
+- 만료 없음 (OAuth refresh 불필요)
+- Kotlin 검증: `key.startsWith("AIzaSy") && key.length == 39`
+
+### Gemini 무료 티어 한도 (2026.02 기준)
+- 출처: https://ai.google.dev/gemini-api/docs/rate-limits
+
+| 모델 | RPM | RPD | TPM |
+|------|-----|-----|-----|
+| Gemini 2.5 Pro | 5 | 100 | 250,000 |
+| Gemini 2.5 Flash | 10 | 250 | 250,000 |
+| Gemini 2.5 Flash-Lite | 15 | 1,000 | 250,000 |
+
+### Antigravity 경고
+- 출처: https://docs.openclaw.ai/concepts/model-providers
+- "Antigravity CLI"는 존재하지 않음. Antigravity = Google DeepMind AI IDE
+- OpenClaw의 `google-antigravity-auth` 플러그인 = Antigravity IDE 할당량 빌려쓰기
+- **사용 금지**: Google ToS 위반 위험, 계정 밴 보고, 주기적 API 버전 차단
+- 대안: Gemini API Key 직접 발급 (안정적, 만료 없음)
+
+### Auth Flow (복사-붙여넣기 방식)
+```
+1. "API 키 받기" 탭 → Intent(ACTION_VIEW, "https://aistudio.google.com/app/apikey")
+2. 사용자가 Google AI Studio에서 키 생성/복사
+3. PocketEngine에 붙여넣기 → 형식 검증 (AIzaSy + 39자)
+4. PRoot 파일시스템에 config 주입:
+   - PicoClaw: /data/data/.../ubuntu-fs/root/.picoclaw/config.json
+   - OpenClaw: /data/data/.../ubuntu-fs/root/.openclaw/openclaw.json
+5. "BotFather 열기" → Intent(ACTION_VIEW, "https://t.me/BotFather")
+6. Telegram 봇 토큰 붙여넣기
+```
+
+### 경쟁 포지셔닝
+- GoClaw (OpenClaw Cloud): **$39/월** — PocketEngine = **$0**
+- openclaw-termux: 터미널 필수, keep-alive 없음
+- ClawPhone: 음성통화 앱 (서버 운영 아님)
+
+### Engine 신규 파일 (Phase 5)
+```
+catalog/
+├── ServiceCatalog.kt        서비스 정의 + InputField 스키마
+├── PicoClawInstaller.kt     PicoClaw 설치/시작/중지
+└── OpenClawInstaller.kt     OpenClaw 설치/시작/중지
+ui/servicestore/
+├── ServiceStoreScreen.kt    서비스 목록
+├── ServiceSetupScreen.kt    API키/봇토큰 입력 위저드
+└── ServiceStoreViewModel.kt 상태 관리
+service/
+└── ServiceManager.kt        서비스 프로세스 관리
+```
+
 ## User Flow
 
 ```
@@ -221,6 +307,9 @@ Engine → Monitor:
 10. **No IAP**: All features free. User acquisition first.
 11. **Never download Engine from Monitor**: Always open browser to Firebase Hosting.
 12. **Design**: Apple-style minimalism, Material 3, blue accent, green/yellow/red status.
+13. **Version sync**: 양 앱 versionCode/versionName 항상 동일. Monitor가 Play Store에 등록되어 있으므로 단독 버전 변경 금지.
+14. **Service Store = Engine only**: AI 비서 설치 기능은 Engine 앱에만 존재. Monitor에 Service Store 코드 없음.
+15. **Antigravity OAuth 사용 금지**: Google ToS 위반 위험. Gemini API Key 직접 발급 방식만 사용.
 
 ## Signing Keystore (Shared Between Both Apps)
 
@@ -267,6 +356,7 @@ The keystore file is gitignored and NEVER committed. If lost, you cannot update 
 
 ## Current Status
 
-**Engine (pocket-server/)**: ~80% code exists from previous phases. Needs IPC server addition + UI trim (remove dashboard/ads).
-**Monitor (pocket-monitor/)**: 0% — new project to be created.
-**Next**: Phase 1 (Engine cleanup + IPC) → Phase 2 (Monitor new dev) → Phase 3 (Firebase Hosting) → Phase 4 (Integration test + launch)
+**Engine (pocket-server/)**: Phase 1-3.5 완료. versionCode 3, versionName "1.1.1"
+**Monitor (pocket-monitor/)**: Phase 2-3.5 완료, Play Store 등록 완료. versionCode 3, versionName "1.1.1"
+**IMPORTANT**: 양 앱 버전 동일 유지 필수. Monitor가 Play Store에 이미 등록되어 있으므로 버전 변경 시 양쪽 동시 업데이트.
+**Next**: Phase 5 — Service Store (AI 비서 원클릭 설치)
