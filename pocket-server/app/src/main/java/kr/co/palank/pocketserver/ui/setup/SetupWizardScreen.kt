@@ -377,7 +377,7 @@ private fun CompletedPhase(
     ipAddress: String?,
     optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
-    onNavigateToServiceStore: () -> Unit = {},
+    onNavigateToServiceStore: () -> Unit,
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -667,7 +667,7 @@ private fun CompletedPhase(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "PicoClaw, OpenClaw 등\nAI 비서를 원클릭으로 설치하세요",
+                    text = "서버에 AI 비서를 설치하고\nTelegram으로 대화해 보세요",
                     fontSize = 14.sp,
                     color = extColors.textSecondary,
                     textAlign = TextAlign.Center,
@@ -682,6 +682,10 @@ private fun CompletedPhase(
                         .fillMaxWidth()
                         .height(44.dp),
                     shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorScheme.primary,
+                        contentColor = colorScheme.onPrimary,
+                    ),
                 ) {
                     Text(
                         text = "AI 비서 설치하기",

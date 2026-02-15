@@ -132,12 +132,16 @@ class MainActivity : ComponentActivity() {
                                     serviceStoreViewModel.startSetup(serviceId)
                                     currentScreen = "service_setup"
                                 },
-                                onBack = { currentScreen = "setup" },
+                                onBack = {
+                                    currentScreen = "setup"
+                                },
                             )
 
                             "service_setup" -> ServiceSetupScreen(
                                 viewModel = serviceStoreViewModel,
-                                onComplete = { currentScreen = "service_store" },
+                                onComplete = {
+                                    currentScreen = "setup"
+                                },
                             )
                         }
                     }
