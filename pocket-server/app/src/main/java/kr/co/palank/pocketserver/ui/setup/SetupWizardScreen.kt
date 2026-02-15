@@ -68,6 +68,7 @@ fun SetupWizardScreen(
     networkMonitor: NetworkMonitor,
     optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
+    onNavigateToServiceStore: () -> Unit = {},
 ) {
     val installState by sessionManager.installState.collectAsState()
     val networkState by networkMonitor.state.collectAsState()
@@ -119,6 +120,7 @@ fun SetupWizardScreen(
                 ipAddress = networkState.ipAddress,
                 optimizationGuideDone = optimizationGuideDone,
                 onNavigateToOptimizationGuide = onNavigateToOptimizationGuide,
+                onNavigateToServiceStore = onNavigateToServiceStore,
             )
             "error" -> ErrorPhase(
                 errorMessage = (installState as? InstallState.Error)?.error ?: "알 수 없는 오류",
@@ -375,6 +377,7 @@ private fun CompletedPhase(
     ipAddress: String?,
     optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
+    onNavigateToServiceStore: () -> Unit,
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -635,6 +638,61 @@ private fun CompletedPhase(
                 SafetyTipRow(text = "금속판 또는 타일 위에 배치")
                 Spacer(modifier = Modifier.height(8.dp))
                 SafetyTipRow(text = "월 1회 배터리 팽창 여부 점검")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // AI 비서 설치 카드
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = colorScheme.primaryContainer.copy(alpha = 0.3f),
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "AI 비서",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "서버에 AI 비서를 설치하고\nTelegram으로 대화해 보세요",
+                    fontSize = 14.sp,
+                    color = extColors.textSecondary,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp,
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onNavigateToServiceStore,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorScheme.primary,
+                        contentColor = colorScheme.onPrimary,
+                    ),
+                ) {
+                    Text(
+                        text = "AI 비서 설치하기",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
 
