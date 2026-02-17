@@ -32,7 +32,7 @@ PocketEngine converts unused smartphones (Galaxy S8, Pixel 3, etc.) into always-
 
 ## Download
 
-Get the latest APK from the [Releases](https://github.com/palank/pocket-engine/releases) page.
+Get the latest APK from the [Releases](https://github.com/PALAN-K/pocket-engine/releases) page.
 
 > PocketEngine is sideloaded (not on Google Play) because it uses PRoot and background services that violate Play Store policies. This is the same reason Termux and UserLand were removed from the Play Store.
 
@@ -47,7 +47,7 @@ Get the latest APK from the [Releases](https://github.com/palank/pocket-engine/r
 ### Steps
 
 ```bash
-git clone https://github.com/palank/pocket-engine.git
+git clone https://github.com/PALAN-K/pocket-engine.git
 cd pocket-engine
 ```
 

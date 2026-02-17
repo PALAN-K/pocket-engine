@@ -7,12 +7,12 @@ Thank you for your interest in contributing to PocketEngine! This guide will hel
 ### Reporting Bugs
 
 - **Device compatibility issues** are especially valuable — we can't test every phone
-- Use the [Bug Report](https://github.com/palank/pocket-engine/issues/new?template=bug_report.md) template
+- Use the [Bug Report](https://github.com/PALAN-K/pocket-engine/issues/new?template=bug_report.md) template
 - Include: device model, Android version, RAM, and steps to reproduce
 
 ### Suggesting Features
 
-- Use the [Feature Request](https://github.com/palank/pocket-engine/issues/new?template=feature_request.md) template
+- Use the [Feature Request](https://github.com/PALAN-K/pocket-engine/issues/new?template=feature_request.md) template
 - Explain the use case, not just the solution
 
 ### Submitting Code
