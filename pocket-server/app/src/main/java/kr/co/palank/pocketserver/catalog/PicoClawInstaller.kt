@@ -3,6 +3,7 @@ package kr.co.palank.pocketserver.catalog
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kr.co.palank.pocketserver.linux.ProotManager
 import org.json.JSONObject
@@ -14,8 +15,6 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
     private val rootfsPath get() = File(context.filesDir, "ubuntu").absolutePath
     private val binaryPath = "/usr/local/bin/picoclaw"
     private val configDir = "/root/.picoclaw"
-    private val configPath = "$configDir/config.json"
-    private val pidFile = "/tmp/picoclaw.pid"
 
     override suspend fun install(onProgress: (Int, String) -> Unit) = withContext(Dispatchers.IO) {
         onProgress(10, "PicoClaw 다운로드 중...")
@@ -74,43 +73,74 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         Unit
     }
 
+    /**
+     * Dropbear 패턴: killOnExit=false로 장기 실행 PRoot 세션을 생성하여
+     * PicoClaw를 포그라운드 프로세스로 실행. exec()의 --kill-on-exit가
+     * nohup 프로세스까지 죽이는 문제를 해결.
+     */
     override suspend fun start(): Boolean = withContext(Dispatchers.IO) {
-        // 기존 프로세스 정리 후 시작 (중복 방지)
+        // 기존 프로세스 정리
+        picoClawProcess?.let { proc ->
+            proc.destroy()
+            if (proc.isAlive) proc.destroyForcibly()
+        }
+        picoClawProcess = null
         prootManager.exec(
             "/bin/bash", "-c",
-            "if [ -f $pidFile ]; then kill \$(cat $pidFile) 2>/dev/null; rm -f $pidFile; fi; " +
             "pkill -f 'picoclaw gateway' 2>/dev/null; sleep 1"
         )
-        // config 존재 확인 (설정 안 된 상태면 시작하지 않음)
+
+        // config 존재 확인
         val configExists = File(rootfsPath, "root/.picoclaw/config.json").exists()
         if (!configExists) {
             Log.w(TAG, "PicoClaw config not found, skipping start")
             return@withContext false
         }
-        val result = prootManager.exec(
+
+        // killOnExit=false: PRoot 세션이 PicoClaw와 함께 유지됨
+        val cmd = prootManager.buildEnvWrappedCommand(
             "/bin/bash", "-c",
-            "nohup picoclaw gateway > /tmp/picoclaw.log 2>&1 & echo \$! > $pidFile; " +
-            "sleep 3; [ -f $pidFile ] && kill -0 \$(cat $pidFile) 2>/dev/null && echo OK || echo FAIL"
+            "exec picoclaw gateway",
+            killOnExit = false
         )
-        val started = result.output.trim().endsWith("OK")
-        Log.i(TAG, "PicoClaw start: code=${result.exitCode}, verified=$started")
-        started
+
+        val logFile = File(rootfsPath, "tmp/picoclaw.log")
+        logFile.parentFile?.mkdirs()
+
+        val pb = ProcessBuilder(cmd)
+        pb.redirectErrorStream(true)
+        pb.redirectOutput(ProcessBuilder.Redirect.to(logFile))
+
+        picoClawProcess = pb.start()
+
+        // 시작 검증 (3초 대기 후 프로세스 생존 확인)
+        delay(3000)
+        val alive = picoClawProcess?.isAlive == true
+        Log.i(TAG, "PicoClaw start: alive=$alive")
+        alive
     }
 
     override suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
-        val result = prootManager.exec(
+        picoClawProcess?.let { proc ->
+            proc.destroy()
+            if (proc.isAlive) proc.destroyForcibly()
+        }
+        picoClawProcess = null
+        // Fallback: PRoot 내 잔여 프로세스 정리
+        prootManager.exec(
             "/bin/bash", "-c",
-            "if [ -f $pidFile ]; then kill \$(cat $pidFile) 2>/dev/null; rm -f $pidFile; fi; " +
             "pkill -f 'picoclaw gateway' 2>/dev/null"
         )
-        Log.i(TAG, "PicoClaw stop: code=${result.exitCode}")
+        Log.i(TAG, "PicoClaw stopped")
         true
     }
 
     override suspend fun isRunning(): Boolean = withContext(Dispatchers.IO) {
+        if (picoClawProcess?.isAlive == true) return@withContext true
+        // Fallback: PRoot 내부에서 확인
         val result = prootManager.exec(
             "/bin/bash", "-c",
-            "[ -f $pidFile ] && kill -0 \$(cat $pidFile) 2>/dev/null && echo running || echo stopped"
+            "pgrep -f 'picoclaw gateway' >/dev/null 2>&1 && echo running || echo stopped"
         )
         result.output.trim() == "running"
     }
@@ -121,5 +151,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
 
     companion object {
         private const val TAG = "PicoClawInstaller"
+        @Volatile
+        private var picoClawProcess: Process? = null
     }
 }

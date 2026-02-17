@@ -3,6 +3,7 @@ package kr.co.palank.pocketserver.catalog
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kr.co.palank.pocketserver.linux.ProotManager
 import org.json.JSONObject
@@ -13,8 +14,6 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
     private val prootManager = ProotManager(context)
     private val rootfsPath get() = File(context.filesDir, "ubuntu").absolutePath
     private val configDir = "/root/.openclaw"
-    private val configPath = "$configDir/config.json"
-    private val pidFile = "/tmp/openclaw.pid"
 
     override suspend fun install(onProgress: (Int, String) -> Unit) = withContext(Dispatchers.IO) {
         // Step 1: Node.js tarball 직접 다운로드 (nodesource 스크립트는 PRoot에서 gpg/systemctl 실패)
@@ -158,44 +157,76 @@ os.networkInterfaces = function() {
         Unit
     }
 
+    /**
+     * Dropbear 패턴: killOnExit=false로 장기 실행 PRoot 세션을 생성하여
+     * OpenClaw를 포그라운드 프로세스로 실행. exec()의 --kill-on-exit가
+     * nohup 프로세스까지 죽이는 문제를 해결.
+     */
     override suspend fun start(): Boolean = withContext(Dispatchers.IO) {
-        // 기존 프로세스 정리 후 시작 (중복 방지)
+        // 기존 프로세스 정리
+        openclawProcess?.let { proc ->
+            proc.destroy()
+            if (proc.isAlive) proc.destroyForcibly()
+        }
+        openclawProcess = null
         prootManager.exec(
             "/bin/bash", "-c",
-            "if [ -f $pidFile ]; then kill \$(cat $pidFile) 2>/dev/null; rm -f $pidFile; fi; " +
             "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1"
         )
-        // config + env 존재 확인
+
+        // config 존재 확인
         val configExists = File(rootfsPath, "root/.openclaw/openclaw.json").exists()
         if (!configExists) {
             Log.w(TAG, "OpenClaw config not found, skipping start")
             return@withContext false
         }
-        val result = prootManager.exec(
+
+        // killOnExit=false: PRoot 세션이 OpenClaw와 함께 유지됨
+        val cmd = prootManager.buildEnvWrappedCommand(
             "/bin/bash", "-c",
             "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
-            "NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js' nohup openclaw gateway run > /tmp/openclaw.log 2>&1 & echo \$! > $pidFile; " +
-            "sleep 5; [ -f $pidFile ] && kill -0 \$(cat $pidFile) 2>/dev/null && echo OK || echo FAIL"
+            "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; " +
+            "exec openclaw gateway run",
+            killOnExit = false
         )
-        val started = result.output.trim().endsWith("OK")
-        Log.i(TAG, "OpenClaw start: code=${result.exitCode}, verified=$started")
-        started
+
+        val logFile = File(rootfsPath, "tmp/openclaw.log")
+        logFile.parentFile?.mkdirs()
+
+        val pb = ProcessBuilder(cmd)
+        pb.redirectErrorStream(true)
+        pb.redirectOutput(ProcessBuilder.Redirect.to(logFile))
+
+        openclawProcess = pb.start()
+
+        // 시작 검증 (5초 대기 후 프로세스 생존 확인)
+        delay(5000)
+        val alive = openclawProcess?.isAlive == true
+        Log.i(TAG, "OpenClaw start: alive=$alive")
+        alive
     }
 
     override suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
-        val result = prootManager.exec(
+        openclawProcess?.let { proc ->
+            proc.destroy()
+            if (proc.isAlive) proc.destroyForcibly()
+        }
+        openclawProcess = null
+        // Fallback: PRoot 내 잔여 프로세스 정리
+        prootManager.exec(
             "/bin/bash", "-c",
-            "if [ -f $pidFile ]; then kill \$(cat $pidFile) 2>/dev/null; rm -f $pidFile; fi; " +
             "pkill -f 'openclaw gateway run' 2>/dev/null"
         )
-        Log.i(TAG, "OpenClaw stop: code=${result.exitCode}")
+        Log.i(TAG, "OpenClaw stopped")
         true
     }
 
     override suspend fun isRunning(): Boolean = withContext(Dispatchers.IO) {
+        if (openclawProcess?.isAlive == true) return@withContext true
+        // Fallback: PRoot 내부에서 확인
         val result = prootManager.exec(
             "/bin/bash", "-c",
-            "[ -f $pidFile ] && kill -0 \$(cat $pidFile) 2>/dev/null && echo running || echo stopped"
+            "pgrep -f 'openclaw gateway run' >/dev/null 2>&1 && echo running || echo stopped"
         )
         result.output.trim() == "running"
     }
@@ -217,5 +248,7 @@ os.networkInterfaces = function() {
         private const val NODE_VERSION = "22.22.0"
         private const val NODE_TARBALL_URL =
             "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-arm64.tar.gz"
+        @Volatile
+        private var openclawProcess: Process? = null
     }
 }
