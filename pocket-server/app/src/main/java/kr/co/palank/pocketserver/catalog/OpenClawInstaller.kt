@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kr.co.palank.pocketserver.linux.ProotManager
 import org.json.JSONObject
 import java.io.File
+import java.security.SecureRandom
 
 class OpenClawInstaller(private val context: Context) : ServiceInstaller {
 
@@ -144,9 +145,19 @@ os.networkInterfaces = function() {
         val apiKey = inputs["gemini_api_key"] ?: throw IllegalArgumentException("Gemini API Key required")
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
 
+        // Gateway 내부 RPC 인증용 토큰 생성 (agent ↔ gateway daemon 통신에 필요)
+        val gatewayToken = SecureRandom().let { rng ->
+            ByteArray(32).also { rng.nextBytes(it) }
+                .joinToString("") { "%02x".format(it) }
+        }
+
         val config = JSONObject().apply {
             put("gateway", JSONObject().apply {
                 put("mode", "local")
+                put("auth", JSONObject().apply {
+                    put("mode", "token")
+                    put("token", gatewayToken)
+                })
             })
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
@@ -243,6 +254,22 @@ os.networkInterfaces = function() {
             }
         }
         Log.i(TAG, "OpenClaw start: alive=$alive")
+
+        // 안전망: gateway 토큰 동기화 (device token mismatch 방지)
+        if (alive) {
+            try {
+                prootManager.exec(
+                    "/bin/bash", "-c",
+                    "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
+                    "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; " +
+                    "openclaw doctor --fix 2>/dev/null || true"
+                )
+                Log.i(TAG, "OpenClaw doctor --fix completed")
+            } catch (e: Exception) {
+                Log.w(TAG, "OpenClaw doctor --fix failed (non-critical)", e)
+            }
+        }
+
         alive
     }
 
