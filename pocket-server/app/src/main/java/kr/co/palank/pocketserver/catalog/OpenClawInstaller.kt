@@ -10,7 +10,6 @@ import kotlinx.coroutines.withContext
 import kr.co.palank.pocketserver.linux.ProotManager
 import org.json.JSONObject
 import java.io.File
-import java.security.SecureRandom
 
 class OpenClawInstaller(private val context: Context) : ServiceInstaller {
 
@@ -145,19 +144,66 @@ os.networkInterfaces = function() {
         val apiKey = inputs["gemini_api_key"] ?: throw IllegalArgumentException("Gemini API Key required")
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
 
-        // Gateway 내부 RPC 인증용 토큰 생성 (agent ↔ gateway daemon 통신에 필요)
-        val gatewayToken = SecureRandom().let { rng ->
-            ByteArray(32).also { rng.nextBytes(it) }
-                .joinToString("") { "%02x".format(it) }
+        // Step 1: .env 먼저 작성 (openclaw onboard가 GEMINI_API_KEY를 env에서 읽음)
+        val envFile = File(rootfsPath, "root/.openclaw/.env")
+        envFile.parentFile?.mkdirs()
+        envFile.writeText("GEMINI_API_KEY=$apiKey\n")
+        Log.i(TAG, "Wrote GEMINI_API_KEY to .env")
+
+        // PRoot 명령 공통 프리앰블: .env 소싱 + bionic bypass
+        val preamble = "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
+            "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; "
+
+        // Step 2: openclaw onboard --non-interactive (공식 CLI로 설정)
+        Log.i(TAG, "Running openclaw onboard --non-interactive")
+        val onboardResult = prootManager.exec(
+            "/bin/bash", "-c",
+            preamble +
+            "openclaw onboard --non-interactive " +
+                "--auth-choice gemini-api-key " +
+                "--mode local " +
+                "--workspace /root/.openclaw/workspace " +
+                "--skip-skills 2>&1"
+        )
+
+        if (onboardResult.isSuccess) {
+            Log.i(TAG, "openclaw onboard succeeded")
+        } else {
+            Log.w(TAG, "openclaw onboard failed, falling back to manual config")
+            Log.w(TAG, "onboard output: ${cleanOutput(onboardResult.output.takeLast(500))}")
+            writeManualConfig(apiKey, telegramToken)
+            return@withContext Unit
         }
 
+        // Step 3: Telegram 채널 설정 (onboard는 채널 설정을 하지 않음)
+        val telegramCommands = listOf(
+            "openclaw config set channels.telegram.enabled true",
+            "openclaw config set channels.telegram.botToken \"$telegramToken\"",
+            "openclaw config set channels.telegram.dmPolicy open",
+            "openclaw config set channels.telegram.allowFrom '[\"*\"]'"
+        )
+
+        for (cmd in telegramCommands) {
+            val result = prootManager.exec("/bin/bash", "-c", preamble + cmd + " 2>&1")
+            if (!result.isSuccess) {
+                Log.w(TAG, "config set failed: ${cleanOutput(result.output.takeLast(300))}")
+                Log.w(TAG, "Falling back to manual Telegram config injection")
+                injectTelegramConfig(telegramToken)
+                break
+            }
+        }
+
+        Log.i(TAG, "OpenClaw configured via CLI (onboard + config set)")
+        Unit
+    }
+
+    /**
+     * Fallback Tier 3: openclaw onboard 실패 시 수동 JSON 작성
+     */
+    private fun writeManualConfig(apiKey: String, telegramToken: String) {
         val config = JSONObject().apply {
             put("gateway", JSONObject().apply {
                 put("mode", "local")
-                put("auth", JSONObject().apply {
-                    put("mode", "token")
-                    put("token", gatewayToken)
-                })
             })
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
@@ -184,13 +230,29 @@ os.networkInterfaces = function() {
         val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
         configFile.parentFile?.mkdirs()
         configFile.writeText(config.toString(2))
+        Log.i(TAG, "Manual fallback: wrote openclaw.json directly")
+    }
 
-        // GEMINI_API_KEY 환경변수를 profile에 설정 (OpenClaw은 env var로 인증)
-        val envFile = File(rootfsPath, "root/.openclaw/.env")
-        envFile.writeText("GEMINI_API_KEY=$apiKey\n")
-
-        Log.i(TAG, "OpenClaw configured (openclaw.json + .env)")
-        Unit
+    /**
+     * Fallback Tier 2: onboard 성공했지만 config set 실패 시, 기존 JSON에 Telegram 설정 주입
+     */
+    private fun injectTelegramConfig(telegramToken: String) {
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        try {
+            val config = if (configFile.exists()) JSONObject(configFile.readText()) else JSONObject()
+            val channels = if (config.has("channels")) config.getJSONObject("channels") else JSONObject()
+            channels.put("telegram", JSONObject().apply {
+                put("enabled", true)
+                put("botToken", telegramToken)
+                put("dmPolicy", "open")
+                put("allowFrom", org.json.JSONArray().apply { put("*") })
+            })
+            config.put("channels", channels)
+            configFile.writeText(config.toString(2))
+            Log.i(TAG, "Telegram config injected into existing openclaw.json")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to inject Telegram config", e)
+        }
     }
 
     /**
