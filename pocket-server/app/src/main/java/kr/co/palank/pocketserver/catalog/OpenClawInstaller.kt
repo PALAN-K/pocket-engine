@@ -49,11 +49,11 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
         }
         Log.i(TAG, "Node.js verified: $versionOutput")
 
-        // Step 4: npm 전역 경로 보장 + build-essential (네이티브 모듈 빌드용, 비치명적)
+        // Step 4: npm 전역 경로 보장 + git + build-essential (git: npm의 GitHub URL 의존성 해소 필수)
         onProgress(35, "빌드 도구 설치 중...")
         prootManager.exec(
             "/bin/bash", "-c",
-            "mkdir -p /usr/local/lib/node_modules && apt-get install -y build-essential 2>/dev/null || true"
+            "mkdir -p /usr/local/lib/node_modules && apt-get update -qq 2>/dev/null; apt-get install -y git build-essential 2>/dev/null || true"
         )
 
         // Step 5: OpenClaw 설치 (--no-color로 ANSI 코드 제거)
