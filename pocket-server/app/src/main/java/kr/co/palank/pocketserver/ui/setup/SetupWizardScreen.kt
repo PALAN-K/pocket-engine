@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -37,6 +38,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,6 +72,7 @@ fun SetupWizardScreen(
     onNavigateToOptimizationGuide: () -> Unit,
     onNavigateToServiceStore: () -> Unit = {},
 ) {
+    val context = LocalContext.current
     val installState by sessionManager.installState.collectAsState()
     val networkState by networkMonitor.state.collectAsState()
 
@@ -121,6 +124,11 @@ fun SetupWizardScreen(
                 optimizationGuideDone = optimizationGuideDone,
                 onNavigateToOptimizationGuide = onNavigateToOptimizationGuide,
                 onNavigateToServiceStore = onNavigateToServiceStore,
+                onResetServer = {
+                    ServerForegroundService.stop(context)
+                    sessionManager.reset()
+                    currentPhase = "spec_check"
+                },
             )
             "error" -> ErrorPhase(
                 errorMessage = (installState as? InstallState.Error)?.error ?: "알 수 없는 오류",
@@ -378,6 +386,7 @@ private fun CompletedPhase(
     optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
     onNavigateToServiceStore: () -> Unit,
+    onResetServer: () -> Unit,
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -850,6 +859,76 @@ private fun CompletedPhase(
             textAlign = TextAlign.Center,
             lineHeight = 18.sp,
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 서버 초기화 버튼 + 2단계 확인 다이얼로그
+        var showResetConfirm1 by remember { mutableStateOf(false) }
+        var showResetConfirm2 by remember { mutableStateOf(false) }
+
+        OutlinedButton(
+            onClick = { showResetConfirm1 = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = extColors.statusRed,
+            ),
+            border = androidx.compose.foundation.BorderStroke(1.dp, extColors.statusRed.copy(alpha = 0.5f)),
+        ) {
+            Text(
+                text = "서버 초기화",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+
+        if (showResetConfirm1) {
+            AlertDialog(
+                onDismissRequest = { showResetConfirm1 = false },
+                title = { Text("서버 초기화") },
+                text = { Text("리눅스 환경의 모든 데이터가 삭제됩니다.\n설치한 서비스와 설정이 모두 사라집니다.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showResetConfirm1 = false
+                            showResetConfirm2 = true
+                        },
+                    ) {
+                        Text("계속", color = extColors.statusRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetConfirm1 = false }) {
+                        Text("취소")
+                    }
+                },
+            )
+        }
+
+        if (showResetConfirm2) {
+            AlertDialog(
+                onDismissRequest = { showResetConfirm2 = false },
+                title = { Text("정말 초기화하시겠습니까?") },
+                text = { Text("이 작업은 되돌릴 수 없습니다.\n서버를 처음부터 다시 설치해야 합니다.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showResetConfirm2 = false
+                            onResetServer()
+                        },
+                    ) {
+                        Text("초기화", color = extColors.statusRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetConfirm2 = false }) {
+                        Text("취소")
+                    }
+                },
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 

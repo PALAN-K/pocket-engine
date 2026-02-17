@@ -17,28 +17,70 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
     private val pidFile = "/tmp/openclaw.pid"
 
     override suspend fun install(onProgress: (Int, String) -> Unit) = withContext(Dispatchers.IO) {
-        onProgress(5, "Node.js 22 설치 중...")
+        // Step 1: Node.js tarball 직접 다운로드 (nodesource 스크립트는 PRoot에서 gpg/systemctl 실패)
+        onProgress(5, "Node.js $NODE_VERSION 다운로드 중... (약 1-3분)")
         var result = prootManager.exec(
             "/bin/bash", "-c",
-            "curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs build-essential"
+            "curl -fsSL --retry 3 --connect-timeout 30 -o /tmp/node.tar.gz '$NODE_TARBALL_URL'"
         )
         if (!result.isSuccess) {
-            throw RuntimeException("Node.js 설치 실패: ${result.output.takeLast(200)}")
+            throw RuntimeException("Node.js 다운로드 실패. 네트워크 연결을 확인해주세요.\n${cleanOutput(result.output.takeLast(500))}")
         }
 
-        onProgress(40, "OpenClaw 설치 중...")
+        // Step 2: tarball 압축 해제 → /usr/local/
+        onProgress(20, "Node.js $NODE_VERSION 설치 중...")
         result = prootManager.exec(
             "/bin/bash", "-c",
-            "npm install -g openclaw"
+            "tar -xzf /tmp/node.tar.gz -C /usr/local/ --strip-components=1 && rm -f /tmp/node.tar.gz"
         )
         if (!result.isSuccess) {
-            throw RuntimeException("OpenClaw 설치 실패: ${result.output.takeLast(200)}")
+            throw RuntimeException("Node.js 압축 해제 실패: ${cleanOutput(result.output.takeLast(500))}")
         }
 
-        onProgress(80, "호환성 패치 적용 중...")
+        // Step 3: node/npm 설치 검증
+        onProgress(30, "Node.js 설치 검증 중...")
+        result = prootManager.exec(
+            "/bin/bash", "-c",
+            "node --version && npm --version"
+        )
+        val versionOutput = cleanOutput(result.output)
+        if (!result.isSuccess || !versionOutput.contains("v22")) {
+            throw RuntimeException("Node.js 설치 검증 실패. node --version 결과: $versionOutput")
+        }
+        Log.i(TAG, "Node.js verified: $versionOutput")
+
+        // Step 4: npm 전역 경로 보장 + build-essential (네이티브 모듈 빌드용, 비치명적)
+        onProgress(35, "빌드 도구 설치 중...")
+        prootManager.exec(
+            "/bin/bash", "-c",
+            "mkdir -p /usr/local/lib/node_modules && apt-get install -y build-essential 2>/dev/null || true"
+        )
+
+        // Step 5: OpenClaw 설치 (--no-color로 ANSI 코드 제거)
+        onProgress(40, "OpenClaw 설치 중... (약 5-15분)")
+        result = prootManager.exec(
+            "/bin/bash", "-c",
+            "npm install -g openclaw --no-color 2>&1"
+        )
+        if (!result.isSuccess) {
+            val cleanErr = cleanOutput(result.output.takeLast(500))
+            throw RuntimeException("OpenClaw 설치 실패:\n$cleanErr\n\n문제가 지속되면 SSH 접속 후 npm debug log를 확인해주세요.")
+        }
+
+        // Step 6: openclaw 바이너리 존재 검증
+        onProgress(75, "OpenClaw 설치 검증 중...")
+        result = prootManager.exec("/bin/bash", "-c", "which openclaw")
+        if (!result.isSuccess) {
+            throw RuntimeException("OpenClaw 바이너리를 찾을 수 없습니다. 설치가 불완전합니다.")
+        }
+        Log.i(TAG, "OpenClaw binary found at: ${cleanOutput(result.output)}")
+
+        // Step 7: Bionic bypass (os.networkInterfaces() PRoot 크래시 방지)
+        onProgress(85, "호환성 패치 적용 중...")
         applyBionicBypass()
 
-        onProgress(90, "설정 디렉토리 생성 중...")
+        // Step 8: 설정 디렉토리 생성
+        onProgress(95, "설정 디렉토리 생성 중...")
         prootManager.exec("/bin/bash", "-c", "mkdir -p $configDir")
 
         onProgress(100, "OpenClaw 설치 완료")
@@ -160,7 +202,16 @@ os.networkInterfaces = function() {
         return globalNodeModules.exists() || localNodeModules.exists()
     }
 
+    /**
+     * ANSI 이스케이프 코드 제거 — npm/curl 출력에 포함된 색상 코드가 UI에 깨져 보이는 문제 방지
+     */
+    private fun cleanOutput(raw: String): String =
+        raw.replace(Regex("\u001B\\[[0-9;]*m"), "").trim()
+
     companion object {
         private const val TAG = "OpenClawInstaller"
+        private const val NODE_VERSION = "22.22.0"
+        private const val NODE_TARBALL_URL =
+            "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-arm64.tar.gz"
     }
 }
