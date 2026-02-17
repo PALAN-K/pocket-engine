@@ -138,6 +138,10 @@ os.networkInterfaces = function() {
                 put("telegram", JSONObject().apply {
                     put("enabled", true)
                     put("botToken", telegramToken)
+                    put("dmPolicy", "open")
+                    put("allowFrom", org.json.JSONArray().apply {
+                        put("*")
+                    })
                 })
             })
         }
