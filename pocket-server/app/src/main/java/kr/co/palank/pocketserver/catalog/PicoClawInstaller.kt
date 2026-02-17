@@ -113,9 +113,22 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
 
         picoClawProcess = pb.start()
 
-        // 시작 검증 (3초 대기 후 프로세스 생존 확인)
-        delay(3000)
-        val alive = picoClawProcess?.isAlive == true
+        // 시작 검증: 최대 10초 polling (1초 간격)
+        var alive = false
+        for (i in 1..10) {
+            delay(1000)
+            if (picoClawProcess?.isAlive != true) {
+                val lastLines = try {
+                    logFile.readLines().takeLast(5).joinToString("\n")
+                } catch (_: Exception) { "로그 읽기 실패" }
+                Log.e(TAG, "PicoClaw died after ${i}s. Last log:\n$lastLines")
+                return@withContext false
+            }
+            if (i >= 3) {
+                alive = true
+                break
+            }
+        }
         Log.i(TAG, "PicoClaw start: alive=$alive")
         alive
     }

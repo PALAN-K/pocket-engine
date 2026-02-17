@@ -12,11 +12,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kr.co.palank.pocketserver.catalog.ServiceCatalog
 import kr.co.palank.pocketserver.linux.ServerState
 import kr.co.palank.pocketserver.linux.SessionManager
 import kr.co.palank.pocketserver.monitor.NetworkMonitor
 import kr.co.palank.pocketserver.monitor.ResourceMonitor
+import kr.co.palank.pocketserver.service.ServiceManager
 import kr.co.palank.pocketserver.util.BatteryMonitor
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -27,6 +30,7 @@ class IpcServer(
     private val context: Context,
     private val sessionManager: SessionManager,
     private val networkMonitor: NetworkMonitor,
+    private val serviceManager: ServiceManager? = null,
 ) {
     private var serverSocket: LocalServerSocket? = null
     private var acceptJob: Job? = null
@@ -104,6 +108,7 @@ class IpcServer(
                 "start" -> handleStart()
                 "stop" -> handleStop()
                 "restart" -> handleRestart()
+                "service_status" -> handleServiceStatus()
                 else -> errorResponse("unknown_command")
             }
         } catch (e: Exception) {
@@ -152,6 +157,28 @@ class IpcServer(
             if (state is ServerState.Error) {
                 put("error_message", state.message)
             }
+        }.toString()
+    }
+
+    private fun handleServiceStatus(): String {
+        val sm = serviceManager ?: return JSONObject().apply {
+            put("ok", true)
+            put("services", JSONArray())
+        }.toString()
+
+        val servicesArray = JSONArray()
+        sm.services.value.forEach { service ->
+            servicesArray.put(JSONObject().apply {
+                put("id", service.serviceId)
+                put("name", service.name)
+                put("status", service.status.name.lowercase())
+                service.errorMessage?.let { put("error", it) }
+            })
+        }
+
+        return JSONObject().apply {
+            put("ok", true)
+            put("services", servicesArray)
         }.toString()
     }
 

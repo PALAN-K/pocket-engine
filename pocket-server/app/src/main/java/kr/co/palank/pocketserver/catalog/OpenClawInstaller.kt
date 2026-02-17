@@ -1,6 +1,8 @@
 package kr.co.palank.pocketserver.catalog
 
 import android.content.Context
+import android.os.Environment
+import android.os.StatFs
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -16,6 +18,19 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
     private val configDir = "/root/.openclaw"
 
     override suspend fun install(onProgress: (Int, String) -> Unit) = withContext(Dispatchers.IO) {
+        // Step 0: 디스크 공간 사전 검증 (Node.js + npm + OpenClaw ≈ 800MB, 최소 1GB 필요)
+        onProgress(2, "저장 공간 확인 중...")
+        val freeMb = getFreeDiskMb()
+        if (freeMb < MIN_FREE_DISK_MB) {
+            throw RuntimeException(
+                "저장 공간이 부족합니다.\n" +
+                "필요: ${MIN_FREE_DISK_MB}MB 이상\n" +
+                "현재 여유: ${freeMb}MB\n\n" +
+                "불필요한 앱이나 파일을 삭제한 후 다시 시도해주세요."
+            )
+        }
+        Log.i(TAG, "Disk space check passed: ${freeMb}MB free")
+
         // Step 1: Node.js tarball 직접 다운로드 (nodesource 스크립트는 PRoot에서 gpg/systemctl 실패)
         onProgress(5, "Node.js $NODE_VERSION 다운로드 중... (약 1-3분)")
         var result = prootManager.exec(
@@ -55,15 +70,25 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
             "mkdir -p /usr/local/lib/node_modules && apt-get update -qq 2>/dev/null; apt-get install -y git build-essential 2>/dev/null || true"
         )
 
-        // Step 5: OpenClaw 설치 (--no-color로 ANSI 코드 제거)
+        // Step 5: OpenClaw 설치 (--jobs=1로 병렬 컴파일 방지 → 3GB RAM OOM 방지)
         onProgress(40, "OpenClaw 설치 중... (약 5-15분)")
         result = prootManager.exec(
             "/bin/bash", "-c",
-            "npm install -g openclaw --no-color 2>&1"
+            "npm install -g openclaw --no-color --jobs=1 2>&1"
         )
         if (!result.isSuccess) {
-            val cleanErr = cleanOutput(result.output.takeLast(500))
-            throw RuntimeException("OpenClaw 설치 실패:\n$cleanErr\n\n문제가 지속되면 SSH 접속 후 npm debug log를 확인해주세요.")
+            // 1회 재시도: npm cache 정리 후 다시 설치
+            Log.w(TAG, "OpenClaw 1차 설치 실패, npm cache 정리 후 재시도")
+            onProgress(45, "설치 재시도 중... (캐시 정리 후)")
+            prootManager.exec("/bin/bash", "-c", "npm cache clean --force 2>/dev/null")
+            result = prootManager.exec(
+                "/bin/bash", "-c",
+                "npm install -g openclaw --no-color --jobs=1 2>&1"
+            )
+            if (!result.isSuccess) {
+                val cleanErr = cleanOutput(result.output.takeLast(500))
+                throw RuntimeException("OpenClaw 설치 실패:\n$cleanErr\n\n문제가 지속되면 SSH 접속 후 npm debug log를 확인해주세요.")
+            }
         }
 
         // Step 6: openclaw 바이너리 존재 검증
@@ -199,9 +224,24 @@ os.networkInterfaces = function() {
 
         openclawProcess = pb.start()
 
-        // 시작 검증 (5초 대기 후 프로세스 생존 확인)
-        delay(5000)
-        val alive = openclawProcess?.isAlive == true
+        // 시작 검증: 최대 15초 polling (1초 간격)
+        var alive = false
+        for (i in 1..15) {
+            delay(1000)
+            if (openclawProcess?.isAlive != true) {
+                // 프로세스가 조기 종료 — 로그에서 원인 확인
+                val lastLines = try {
+                    logFile.readLines().takeLast(5).joinToString("\n")
+                } catch (_: Exception) { "로그 읽기 실패" }
+                Log.e(TAG, "OpenClaw died after ${i}s. Last log:\n$lastLines")
+                return@withContext false
+            }
+            // 3초 이상 생존하면 성공으로 판단 (초기 크래시 아님)
+            if (i >= 3) {
+                alive = true
+                break
+            }
+        }
         Log.i(TAG, "OpenClaw start: alive=$alive")
         alive
     }
@@ -243,11 +283,21 @@ os.networkInterfaces = function() {
     private fun cleanOutput(raw: String): String =
         raw.replace(Regex("\u001B\\[[0-9;]*m"), "").trim()
 
+    private fun getFreeDiskMb(): Long {
+        return try {
+            val stat = StatFs(Environment.getDataDirectory().path)
+            stat.blockSizeLong * stat.availableBlocksLong / (1024 * 1024)
+        } catch (e: Exception) {
+            Long.MAX_VALUE // 확인 불가 시 통과
+        }
+    }
+
     companion object {
         private const val TAG = "OpenClawInstaller"
         private const val NODE_VERSION = "22.22.0"
         private const val NODE_TARBALL_URL =
             "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-arm64.tar.gz"
+        private const val MIN_FREE_DISK_MB = 1024L // 1GB
         @Volatile
         private var openclawProcess: Process? = null
     }

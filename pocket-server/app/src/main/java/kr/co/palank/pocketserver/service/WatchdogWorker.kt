@@ -5,6 +5,8 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.*
+import kotlinx.coroutines.runBlocking
+import kr.co.palank.pocketserver.catalog.ServiceCatalog
 import kr.co.palank.pocketserver.linux.ServerState
 import kr.co.palank.pocketserver.util.BatteryMonitor
 import java.util.concurrent.TimeUnit
@@ -50,9 +52,56 @@ class WatchdogWorker(
                 val intent = Intent(context, ServerForegroundService::class.java)
                 ContextCompat.startForegroundService(context, intent)
             }
+
+            // 서버가 실행 중일 때만 서비스 크래시 복구 수행
+            if (currentState is ServerState.Running) {
+                checkAndRecoverServices(context, prefs)
+            }
         }
 
         return Result.success()
+    }
+
+    /**
+     * 설치된 서비스(PicoClaw/OpenClaw)가 크래시되었는지 확인하고 자동 복구.
+     * 최대 MAX_AUTO_RESTART_COUNT회까지 자동 재시작, 초과 시 포기.
+     */
+    private fun checkAndRecoverServices(context: Context, prefs: android.content.SharedPreferences) {
+        try {
+            for (def in ServiceCatalog.services) {
+                val installer = def.installer(context)
+                if (!installer.isInstalled()) continue
+
+                val running = runBlocking { installer.isRunning() }
+                if (running) {
+                    // 실행 중 → 재시작 카운터 초기화
+                    prefs.edit().putInt("${KEY_SERVICE_RESTART_COUNT}_${def.id}", 0).apply()
+                    continue
+                }
+
+                // 크래시 감지: 설치되어 있지만 실행 중이 아님
+                val restartCount = prefs.getInt("${KEY_SERVICE_RESTART_COUNT}_${def.id}", 0)
+                if (restartCount >= MAX_AUTO_RESTART_COUNT) {
+                    Log.w(TAG, "${def.name} crashed ${restartCount}+ times, skipping auto-restart")
+                    continue
+                }
+
+                Log.i(TAG, "${def.name} not running, auto-restarting (attempt ${restartCount + 1}/$MAX_AUTO_RESTART_COUNT)")
+                val started = runBlocking { installer.start() }
+                prefs.edit().putInt(
+                    "${KEY_SERVICE_RESTART_COUNT}_${def.id}",
+                    if (started) 0 else restartCount + 1
+                ).apply()
+
+                if (started) {
+                    Log.i(TAG, "${def.name} auto-restarted successfully")
+                } else {
+                    Log.e(TAG, "${def.name} auto-restart failed (attempt ${restartCount + 1})")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Service recovery check failed", e)
+        }
     }
 
     companion object {
@@ -61,6 +110,8 @@ class WatchdogWorker(
         private const val PREFS_NAME = "server_prefs"
         private const val KEY_SERVER_SHOULD_RUN = "server_should_run"
         private const val KEY_THERMAL_STOPPED = "thermal_stopped"
+        private const val KEY_SERVICE_RESTART_COUNT = "service_restart_count"
+        private const val MAX_AUTO_RESTART_COUNT = 3
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<WatchdogWorker>(

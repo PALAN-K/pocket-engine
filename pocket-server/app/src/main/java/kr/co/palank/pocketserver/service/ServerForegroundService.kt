@@ -136,7 +136,8 @@ class ServerForegroundService : Service() {
         if (ipcServer != null) return
         val manager = sessionManager ?: return
         val network = networkMonitor ?: return
-        ipcServer = IpcServer(this, manager, network).also {
+        val sm = ServiceManager(this)
+        ipcServer = IpcServer(this, manager, network, sm).also {
             it.start(serviceScope)
         }
     }
