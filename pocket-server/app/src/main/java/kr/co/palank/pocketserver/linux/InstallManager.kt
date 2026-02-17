@@ -401,27 +401,34 @@ class InstallManager(private val context: Context) {
     private suspend fun ensureSshPassword() {
         val password = sshPassword ?: generatePassword()
         prefs.edit().putString(KEY_SSH_PASSWORD, password).apply()
+        Log.i(TAG, "ensureSshPassword: setting password (length=${password.length})")
 
-        prootManager.exec("/bin/sh", "-c",
-            "echo 'root:$password' | chpasswd"
+        // chpasswd로 비밀번호 설정
+        var result = prootManager.exec("/bin/sh", "-c",
+            "echo 'root:$password' | chpasswd 2>&1"
         )
+        Log.i(TAG, "chpasswd root: success=${result.isSuccess}, output=${result.output.take(200)}")
 
         prootManager.exec("/bin/sh", "-c",
             "id pocketserver >/dev/null 2>&1 || useradd -m -s /bin/bash pocketserver"
         )
-        prootManager.exec("/bin/sh", "-c",
-            "echo 'pocketserver:$password' | chpasswd"
+        result = prootManager.exec("/bin/sh", "-c",
+            "echo 'pocketserver:$password' | chpasswd 2>&1"
         )
+        Log.i(TAG, "chpasswd pocketserver: success=${result.isSuccess}, output=${result.output.take(200)}")
 
-        // Copy shadow hashes into /etc/passwd for non-root SSH compatibility
-        prootManager.exec("/bin/sh", "-c",
-            "HASH=\$(grep '^root:' /etc/shadow | cut -d: -f2) && " +
-            "sed -i \"s|^root:[^:]*:|root:\$HASH:|\" /etc/passwd"
+        // /etc/shadow 해시를 /etc/passwd에 복사 (Dropbear가 /etc/passwd만 읽는 경우 대비)
+        // sed 대신 awk 사용 — 해시에 포함된 $ 문자가 sed를 깨뜨리는 문제 방지
+        result = prootManager.exec("/bin/sh", "-c",
+            "awk -F: 'NR==FNR{hash[\$1]=\$2;next} \$1 in hash{\$2=hash[\$1]} {print}' OFS=: /etc/shadow /etc/passwd > /tmp/passwd.tmp && mv /tmp/passwd.tmp /etc/passwd && chmod 644 /etc/passwd 2>&1"
         )
-        prootManager.exec("/bin/sh", "-c",
-            "HASH=\$(grep '^pocketserver:' /etc/shadow | cut -d: -f2) && " +
-            "sed -i \"s|^pocketserver:[^:]*:|pocketserver:\$HASH:|\" /etc/passwd"
+        Log.i(TAG, "passwd hash copy: success=${result.isSuccess}, output=${result.output.take(200)}")
+
+        // 검증: /etc/passwd에서 root 해시가 실제로 설정되었는지 확인
+        result = prootManager.exec("/bin/sh", "-c",
+            "head -1 /etc/passwd | cut -d: -f2 | head -c 10"
         )
+        Log.i(TAG, "root passwd hash prefix: ${result.output.take(20)}")
 
         prootManager.exec("/bin/sh", "-c",
             "chmod 700 /root && test -f /root/.bashrc || echo '# .bashrc' > /root/.bashrc"
