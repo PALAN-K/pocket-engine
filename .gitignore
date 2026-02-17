@@ -1,0 +1,41 @@
+# Android
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# App build outputs
+/app/build/
+/app/release/
+
+# Gradle
+gradle-app.setting
+!gradle-wrapper.jar
+.gradletasknamecache
+
+# Kotlin
+*.class
+
+# PRoot binary (downloaded by Gradle task at build time)
+/app/src/main/assets/proot/
+
+# Firebase (contains project-specific config)
+/app/google-services.json
+
+# Signing keystore
+*.jks
+*.keystore
+keystore.properties
+
+# Local
+*.log
+*.tmp
