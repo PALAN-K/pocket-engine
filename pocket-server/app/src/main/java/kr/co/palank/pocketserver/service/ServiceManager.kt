@@ -133,10 +133,15 @@ class ServiceManager(private val context: Context) {
                     try {
                         val installer = getOrCreateInstaller(service.serviceId)
                         if (installer.isInstalled()) {
-                            val running = installer.isRunning()
-                            if (!running) {
-                                installer.start()
+                            // 항상 start() 호출: start()가 내부적으로 기존 프로세스를 정리한 후
+                            // 새 프로세스를 시작함. isRunning() false positive로 인한
+                            // 자동 시작 누락 방지 (앱 재시작 시 zombie 프로세스 감지 문제)
+                            val started = installer.start()
+                            if (started) {
                                 updateServiceStatus(service.serviceId, ServiceStatus.RUNNING)
+                                Log.i(TAG, "Auto-started service: ${service.serviceId}")
+                            } else {
+                                Log.w(TAG, "Auto-start returned false for ${service.serviceId}")
                             }
                         }
                     } catch (e: Exception) {

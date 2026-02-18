@@ -208,9 +208,9 @@ os.networkInterfaces = function() {
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
                     put("model", JSONObject().apply {
-                        put("primary", "google/gemini-2.5-flash")
+                        put("primary", "google/gemini-2.5-flash-lite")
                         put("fallbacks", org.json.JSONArray().apply {
-                            put("google/gemma-3-27b-it")
+                            put("google/gemini-2.5-flash")
                         })
                     })
                 })
@@ -279,6 +279,9 @@ os.networkInterfaces = function() {
             return@withContext false
         }
 
+        // doctor --fix 제거: gateway가 자체적으로 auth token을 관리함.
+        // doctor --fix가 config를 수정하면 gateway 시작 시 token mismatch 발생.
+
         // killOnExit=false: PRoot 세션이 OpenClaw와 함께 유지됨
         val cmd = prootManager.buildEnvWrappedCommand(
             "/bin/bash", "-c",
@@ -316,21 +319,6 @@ os.networkInterfaces = function() {
             }
         }
         Log.i(TAG, "OpenClaw start: alive=$alive")
-
-        // 안전망: gateway 토큰 동기화 (device token mismatch 방지)
-        if (alive) {
-            try {
-                prootManager.exec(
-                    "/bin/bash", "-c",
-                    "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
-                    "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; " +
-                    "openclaw doctor --fix 2>/dev/null || true"
-                )
-                Log.i(TAG, "OpenClaw doctor --fix completed")
-            } catch (e: Exception) {
-                Log.w(TAG, "OpenClaw doctor --fix failed (non-critical)", e)
-            }
-        }
 
         alive
     }

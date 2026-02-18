@@ -19,17 +19,35 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
     override suspend fun install(onProgress: (Int, String) -> Unit) = withContext(Dispatchers.IO) {
         onProgress(10, "PicoClaw 다운로드 중...")
 
-        val result = prootManager.exec(
+        // GitHub Releases에서 tar.gz 아카이브 다운로드
+        val downloadResult = prootManager.exec(
             "/bin/bash", "-c",
-            "curl -fsSL -L https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw-linux-arm64 -o $binaryPath && chmod +x $binaryPath"
+            "curl -fsSL -L '$DOWNLOAD_URL' -o /tmp/picoclaw.tar.gz"
         )
+        if (!downloadResult.isSuccess) {
+            throw RuntimeException("PicoClaw 다운로드 실패: ${downloadResult.output.takeLast(200)}")
+        }
 
-        if (!result.isSuccess) {
-            throw RuntimeException("PicoClaw 다운로드 실패: ${result.output.takeLast(200)}")
+        onProgress(50, "PicoClaw 설치 중...")
+
+        // tar.gz 압축 해제 → 바이너리를 /usr/local/bin/에 배치
+        val extractResult = prootManager.exec(
+            "/bin/bash", "-c",
+            "tar -xzf /tmp/picoclaw.tar.gz -C /tmp/ && " +
+            "mv /tmp/picoclaw $binaryPath && " +
+            "chmod +x $binaryPath && " +
+            "rm -f /tmp/picoclaw.tar.gz"
+        )
+        if (!extractResult.isSuccess) {
+            throw RuntimeException("PicoClaw 압축 해제 실패: ${extractResult.output.takeLast(200)}")
         }
 
         onProgress(80, "설정 디렉토리 생성 중...")
         prootManager.exec("/bin/bash", "-c", "mkdir -p $configDir")
+
+        // 설치 검증
+        val verifyResult = prootManager.exec("/bin/bash", "-c", "picoclaw --version 2>&1 || echo 'verify_failed'")
+        Log.i(TAG, "PicoClaw version: ${verifyResult.output.trim()}")
 
         onProgress(100, "PicoClaw 설치 완료")
         Log.i(TAG, "PicoClaw installed successfully")
@@ -43,26 +61,28 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         val config = JSONObject().apply {
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
-                    put("model", "gemini-2.5-flash")
+                    put("workspace", "~/.picoclaw/workspace")
+                    put("provider", "gemini")
+                    put("model", "gemini-2.5-flash-lite")
                     put("max_tokens", 8192)
                     put("temperature", 0.7)
+                    put("max_tool_iterations", 20)
                 })
             })
             put("providers", JSONObject().apply {
                 put("gemini", JSONObject().apply {
                     put("api_key", apiKey)
-                    put("models", org.json.JSONArray().apply {
-                        put("gemini-2.5-flash")
-                        put("gemma-3-27b-it")
-                    })
+                    put("api_base", "https://generativelanguage.googleapis.com/v1beta/openai")
                 })
             })
             put("channels", JSONObject().apply {
                 put("telegram", JSONObject().apply {
                     put("enabled", true)
                     put("token", telegramToken)
+                    put("allowFrom", org.json.JSONArray().apply { put("*") })
                 })
             })
+            put("tools", JSONObject())
         }
 
         val configFile = File(rootfsPath, "root/.picoclaw/config.json")
@@ -164,6 +184,8 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
 
     companion object {
         private const val TAG = "PicoClawInstaller"
+        private const val DOWNLOAD_URL =
+            "https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw_Linux_arm64.tar.gz"
         @Volatile
         private var picoClawProcess: Process? = null
     }
