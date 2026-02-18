@@ -58,28 +58,24 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         val apiKey = inputs["gemini_api_key"] ?: throw IllegalArgumentException("Gemini API Key required")
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
 
+        // 사용자 입력값 + 모델명만 주입, 나머지는 PicoClaw 기본값에 위임
         val config = JSONObject().apply {
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
-                    put("workspace", "~/.picoclaw/workspace")
-                    put("provider", "gemini")
                     put("model", "gemini-2.5-flash-lite")
-                    put("max_tokens", 8192)
-                    put("temperature", 0.7)
-                    put("max_tool_iterations", 20)
                 })
             })
             put("providers", JSONObject().apply {
                 put("gemini", JSONObject().apply {
                     put("api_key", apiKey)
-                    put("api_base", "https://generativelanguage.googleapis.com/v1beta/openai")
+                    put("api_base", "")
                 })
             })
             put("channels", JSONObject().apply {
                 put("telegram", JSONObject().apply {
                     put("enabled", true)
                     put("token", telegramToken)
-                    put("allowFrom", org.json.JSONArray().apply { put("*") })
+                    put("allow_from", org.json.JSONArray().apply { put("*") })
                 })
             })
             put("tools", JSONObject())
