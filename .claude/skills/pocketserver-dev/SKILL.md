@@ -216,6 +216,11 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
 - Config: `~/.picoclaw/config.json`
 - 채널: Telegram, Discord, QQ 지원
 - 구형폰(3GB RAM)에서 완벽 동작
+- `picoclaw onboard`는 CLI 플래그 미지원 → config.json 직접 생성 방식 사용
+- `allow_from: []` (빈 배열 = 전체 허용, `["*"]` 와일드카드 미지원 — exact match만 수행)
+- model 형식: `provider/model` (예: `groq/llama-3.3-70b-versatile`, `gemini/gemini-2.5-flash`)
+- 필수 기본값: max_tokens=8192, temperature=0.7, max_tool_iterations=20
+- Groq tool_use_failed: Groq API 상류 간헐적 버그, 우리 코드로 수정 불가 (출처: https://community.groq.com/t/tool-use-failed-on-llama4-models/427)
 
 ### OpenClaw on PRoot
 - 출처: https://docs.openclaw.ai
@@ -225,6 +230,13 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
   - 참고: https://sagartamang.com/blog/openclaw-on-android-termux
 - RAM 2-4GB 필요 — 구형폰 3GB에서는 불안정
 - 4GB+ RAM 기기 전용 "고급" 옵션으로 배치
+- onboard 개선 플래그: `--non-interactive --accept-risk --skip-channels --skip-health --skip-daemon`
+  - `--skip-channels`: 채널은 `config set`으로 별도 처리
+  - `--skip-health`: PRoot에서 health check 실패 방지
+  - `--skip-daemon`: PRoot에서 systemd 불가
+  - `--accept-risk`: non-interactive 모드 필수 플래그 (2026.02 추가됨)
+- 성공 판단: exit code 대신 config 파일 존재+크기 확인 (onboard가 config 작성 후 daemon 단계에서 exit 1 반환할 수 있음)
+- `reserveTokensFloor: 4000` 필수 (Groq Llama 모델의 context overflow 방지)
 
 ### Gemini API Key
 - 출처: https://ai.google.dev/gemini-api/docs/api-key
@@ -261,6 +273,12 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
 5. "BotFather 열기" → Intent(ACTION_VIEW, "https://t.me/BotFather")
 6. Telegram 봇 토큰 붙여넣기
 ```
+
+### 재설정 시 기존 값 프리필
+- `readCurrentConfig()` 구현: 기존 config에서 api_key, telegram_token을 읽어 UI에 프리필
+- PicoClaw: `config.json` → `providers.gemini.api_key`, `channels.telegram.token`
+- OpenClaw: `openclaw.json` → 해당 필드
+- 사용자가 "재설정" 시 기존 값이 입력 필드에 미리 표시되어 편의성 향상
 
 ### 경쟁 포지셔닝
 - GoClaw (OpenClaw Cloud): **$39/월** — PocketEngine = **$0**
@@ -310,6 +328,8 @@ service/
 13. **Version sync**: 양 앱 versionCode/versionName 항상 동일. Monitor가 Play Store에 등록되어 있으므로 단독 버전 변경 금지.
 14. **Service Store = Engine only**: AI 비서 설치 기능은 Engine 앱에만 존재. Monitor에 Service Store 코드 없음.
 15. **Antigravity OAuth 사용 금지**: Google ToS 위반 위험. Gemini API Key 직접 발급 방식만 사용.
+16. **PicoClaw allow_from은 반드시 빈 배열 `[]`**: `["*"]`는 와일드카드로 동작하지 않음. exact match만 수행하므로 빈 배열이 "전체 허용"의 유일한 방법.
+17. **Groq tool_use_failed는 상류 API 버그**: config 수정으로 해결 불가. Llama 모델의 간헐적 tool call 실패이며 Groq 측에서 수정해야 함.
 
 ## Signing Keystore (Shared Between Both Apps)
 

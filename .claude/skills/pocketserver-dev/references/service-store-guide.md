@@ -46,35 +46,78 @@ picoclaw --version
 
 ## 3. PicoClaw config.json 템플릿
 
+아래는 공식 DefaultConfig 구조를 기반으로 한 전체 config.json 템플릿이다.
+`picoclaw onboard`는 CLI 플래그를 지원하지 않으므로 (provider/model/api_key 등을 인수로 전달 불가),
+config 파일을 PocketEngine Kotlin 코드에서 직접 생성해야 한다.
+
 ```json
 {
   "agents": {
     "defaults": {
       "workspace": "~/.picoclaw/workspace",
-      "model": "gemini-2.5-flash",
+      "restrict_to_workspace": true,
+      "model": "groq/llama-3.3-70b-versatile",
       "max_tokens": 8192,
       "temperature": 0.7,
       "max_tool_iterations": 20
     }
   },
   "providers": {
+    "groq": {
+      "api_key": "${GROQ_API_KEY}",
+      "api_base": ""
+    },
     "gemini": {
-      "api_key": "${GEMINI_API_KEY}"
+      "api_key": "${GEMINI_API_KEY}",
+      "api_base": ""
     }
   },
   "channels": {
     "telegram": {
       "enabled": true,
       "token": "${TELEGRAM_BOT_TOKEN}",
-      "allowFrom": ["${TELEGRAM_USER_ID}"]
+      "proxy": "",
+      "allow_from": []
     }
   },
-  "tools": {}
+  "tools": {},
+  "heartbeat": {
+    "enabled": true,
+    "interval": 30
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  }
 }
 ```
 
-- 출처: https://picoclaw.ai/docs
+- 출처: https://github.com/sipeed/picoclaw/blob/main/config/config.example.json
 - `${...}` 플레이스홀더는 PocketEngine Kotlin 코드에서 사용자 입력값으로 교체
+- `allow_from: []` (빈 배열) = 모든 발신자 허용. `["*"]`는 와일드카드로 동작하지 않음 (exact match만 수행)
+- model 형식: `provider/model` (예: `groq/llama-3.3-70b-versatile`, `gemini/gemini-2.5-flash`)
+- `restrict_to_workspace: true` — 에이전트가 workspace 외부 파일에 접근하지 못하도록 제한
+- `heartbeat.interval: 30` — 30초 간격 heartbeat (기본값)
+- `gateway.port: 18790` — PicoClaw 내장 게이트웨이 기본 포트
+
+## 3.1 PicoClaw Config 주의사항
+
+### allow_from 와일드카드 미지원
+- `allow_from: ["*"]`는 와일드카드로 동작하지 않는다. `"*"`라는 문자열과 정확히 일치하는 sender만 허용됨.
+- **반드시 빈 배열 `[]`을 사용**해야 모든 발신자를 허용한다.
+- 특정 사용자만 허용하려면 Telegram user ID를 문자열로 입력: `["123456789"]`
+
+### Groq tool_use_failed 에러
+- Groq API에서 Llama 모델 사용 시 간헐적으로 `tool_use_failed` 에러가 발생한다.
+- 이는 **Groq API 상류 버그**로 우리 코드에서 수정할 수 없다.
+- Llama 4 모델에서 특히 빈번하며, Llama 3.3-70b에서도 간헐적 발생.
+- 출처: https://community.groq.com/t/tool-use-failed-on-llama4-models/427
+- 대응: 사용자에게 "간헐적 에러는 정상이며, 자동 재시도됩니다" 안내 고려.
+
+### ChatGPT/OAuth 브라우저 로그인 불가
+- ChatGPT provider의 OAuth/브라우저 로그인 방식은 PRoot 환경에서 실현 불가능하다.
+- PRoot 내부에 브라우저가 없고, 토큰 만료 주기가 짧으며, OpenAI ToS 위반 위험이 있다.
+- **PicoClaw에서 지원하는 API key 기반 provider만 사용** (Gemini, Groq 등).
 
 ## 4. OpenClaw 설치 스크립트
 
@@ -124,6 +167,65 @@ mkdir -p /root/.openclaw
 
 echo "[6/6] OpenClaw 설치 완료"
 openclaw --version
+```
+
+## 4.1 OpenClaw onboard 개선 (--non-interactive 모드)
+
+설치 후 초기 설정에 `openclaw onboard --non-interactive`를 사용한다.
+이 모드는 사용자 입력 없이 config 파일을 생성하며, PRoot 환경에서 불필요한 단계를 건너뛸 수 있다.
+
+```bash
+openclaw onboard --non-interactive \
+  --accept-risk \
+  --auth-choice $authChoice \
+  --mode local \
+  --workspace /root/.openclaw/workspace \
+  --skip-skills \
+  --skip-channels \
+  --skip-health \
+  --skip-daemon
+```
+
+### 플래그 설명
+
+| 플래그 | 역할 | 비고 |
+|--------|------|------|
+| `--non-interactive` | 대화형 프롬프트 비활성화 | 필수 |
+| `--accept-risk` | non-interactive 모드에서 면책 동의 | 2026.02 추가됨, 필수 |
+| `--auth-choice` | 인증 방식 선택 (gemini-api-key 등) | `$authChoice` 변수로 전달 |
+| `--mode local` | 로컬 모드 (서버 모드 아님) | PRoot에서는 항상 local |
+| `--workspace` | 작업 디렉토리 경로 | 기본값 `/root/.openclaw/workspace` |
+| `--skip-skills` | 스킬 설치 단계 건너뛰기 | 채널 설정 후 별도 추가 가능 |
+| `--skip-channels` | 채널 설정 단계 건너뛰기 | `config set`으로 별도 처리 |
+| `--skip-health` | health check 단계 건너뛰기 | **PRoot에서 health check 실패 방지** |
+| `--skip-daemon` | daemon 시작 단계 건너뛰기 | **PRoot에서 systemd 불가** |
+
+### 성공 판단 기준
+
+**exit code에 의존하지 말 것.** onboard 명령은 config 파일을 성공적으로 작성한 뒤에도
+daemon 시작 단계에서 실패하여 exit code 1을 반환할 수 있다 (PRoot에서 systemd 없음).
+
+대신 config 파일의 존재 여부와 크기로 판단:
+```kotlin
+// 성공 판단 예시
+val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+val success = configFile.exists() && configFile.length() > 100
+```
+
+### 필수 config 값
+
+onboard 이후 반드시 다음 값을 config에 추가/수정해야 한다:
+- `reserveTokensFloor: 4000` — Groq Llama 모델의 context overflow 방지 필수
+  - 기본값이 너무 낮아 Llama 모델에서 context window 초과 에러 발생
+  - `openclaw config set reserveTokensFloor 4000` 또는 config 파일 직접 수정
+
+### 채널 설정 (onboard 이후 별도)
+
+`--skip-channels`로 건너뛴 채널 설정은 다음과 같이 처리:
+```bash
+# Telegram 채널 추가
+openclaw config set channels.telegram.enabled true
+openclaw config set channels.telegram.token "${TELEGRAM_BOT_TOKEN}"
 ```
 
 ## 5. Gemini API Key 검증

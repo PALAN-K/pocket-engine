@@ -55,35 +55,63 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
     }
 
     override suspend fun configure(inputs: Map<String, String>) = withContext(Dispatchers.IO) {
-        val apiKey = inputs["gemini_api_key"] ?: throw IllegalArgumentException("Gemini API Key required")
+        val provider = inputs["provider"] ?: "gemini"
+        val model = inputs["model"] ?: "gemini-2.5-flash-lite"
+        val apiKey = inputs["api_key"] ?: throw IllegalArgumentException("API Key required")
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
 
-        // 사용자 입력값 + 모델명만 주입, 나머지는 PicoClaw 기본값에 위임
+        // Groq: provider prefix 필수 (normalizeModel()이 "groq/" 제거)
+        // Gemini: prefix 없이 사용 (PicoClaw의 normalizeModel()이 "gemini/" 미지원, "google/"만 지원)
+        val qualifiedModel = when (provider) {
+            "groq" -> "groq/$model"
+            else -> model
+        }
+
         val config = JSONObject().apply {
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
-                    put("model", "gemini-2.5-flash-lite")
+                    put("workspace", "~/.picoclaw/workspace")
+                    put("restrict_to_workspace", true)
+                    put("model", qualifiedModel)
+                    put("max_tokens", 8192)
+                    put("temperature", 0.7)
+                    put("max_tool_iterations", 20)
                 })
             })
             put("providers", JSONObject().apply {
-                put("gemini", JSONObject().apply {
+                put(provider, JSONObject().apply {
                     put("api_key", apiKey)
-                    put("api_base", "")
+                    // Gemini: 기본 v1beta가 /chat/completions 미지원 → v1beta/openai 필수
+                    put("api_base", if (provider == "gemini")
+                        "https://generativelanguage.googleapis.com/v1beta/openai" else "")
                 })
             })
             put("channels", JSONObject().apply {
                 put("telegram", JSONObject().apply {
                     put("enabled", true)
                     put("token", telegramToken)
-                    put("allow_from", org.json.JSONArray().apply { put("*") })
+                    put("proxy", "")
+                    put("allow_from", org.json.JSONArray()) // 빈 배열 = 전체 허용 (PicoClaw는 와일드카드 미지원)
                 })
             })
             put("tools", JSONObject())
+            put("heartbeat", JSONObject().apply {
+                put("enabled", true)
+                put("interval", 30)
+            })
+            put("gateway", JSONObject().apply {
+                put("host", "0.0.0.0")
+                put("port", 18790)
+            })
         }
 
         val configFile = File(rootfsPath, "root/.picoclaw/config.json")
         configFile.parentFile?.mkdirs()
         configFile.writeText(config.toString(2))
+
+        // workspace 디렉토리 생성
+        val workspaceDir = File(rootfsPath, "root/.picoclaw/workspace")
+        workspaceDir.mkdirs()
 
         Log.i(TAG, "PicoClaw configured")
         Unit
@@ -176,6 +204,33 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
 
     override fun isInstalled(): Boolean {
         return File(rootfsPath, "usr/local/bin/picoclaw").exists()
+    }
+
+    override fun readCurrentConfig(): Map<String, String>? {
+        val configFile = File(rootfsPath, "root/.picoclaw/config.json")
+        if (!configFile.exists()) return null
+        return try {
+            val json = JSONObject(configFile.readText())
+            val rawModel = json.optJSONObject("agents")?.optJSONObject("defaults")?.optString("model", "") ?: ""
+            val providers = json.optJSONObject("providers")
+            val provider = providers?.keys()?.asSequence()?.firstOrNull() ?: ""
+            // Strip provider prefix (e.g., "groq/llama-3.3-70b-versatile" → "llama-3.3-70b-versatile")
+            val displayModel = rawModel.removePrefix("groq/").removePrefix("gemini/")
+
+            // api_key와 telegram_token도 반환하여 재설정 시 기존 값 프리필
+            val apiKey = providers?.optJSONObject(provider)?.optString("api_key", "") ?: ""
+            val telegramToken = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("token", "") ?: ""
+
+            mapOf(
+                "provider" to provider,
+                "model" to displayModel,
+                "api_key" to apiKey,
+                "telegram_token" to telegramToken,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read PicoClaw config", e)
+            null
+        }
     }
 
     companion object {

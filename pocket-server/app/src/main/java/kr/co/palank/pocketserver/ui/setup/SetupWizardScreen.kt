@@ -52,6 +52,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -60,10 +61,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kr.co.palank.pocketserver.catalog.ServiceCatalog
 import kr.co.palank.pocketserver.linux.InstallState
 import kr.co.palank.pocketserver.linux.SessionManager
 import kr.co.palank.pocketserver.monitor.NetworkMonitor
+import kr.co.palank.pocketserver.service.InstalledService
 import kr.co.palank.pocketserver.service.ServerForegroundService
+import kr.co.palank.pocketserver.service.ServiceStatus
+import kr.co.palank.pocketserver.ui.servicestore.ServiceStoreViewModel
 import kr.co.palank.pocketserver.ui.theme.PocketServerExtendedTheme
 import kr.co.palank.pocketserver.util.DeviceSpec
 
@@ -75,6 +80,8 @@ fun SetupWizardScreen(
     optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
     onNavigateToServiceStore: () -> Unit = {},
+    onReconfigure: (String) -> Unit = {},
+    serviceStoreViewModel: ServiceStoreViewModel? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -129,6 +136,8 @@ fun SetupWizardScreen(
                 optimizationGuideDone = optimizationGuideDone,
                 onNavigateToOptimizationGuide = onNavigateToOptimizationGuide,
                 onNavigateToServiceStore = onNavigateToServiceStore,
+                onReconfigure = onReconfigure,
+                serviceStoreViewModel = serviceStoreViewModel,
                 onResetServer = {
                     scope.launch {
                         ServerForegroundService.stop(context)
@@ -393,6 +402,8 @@ private fun CompletedPhase(
     optimizationGuideDone: Boolean,
     onNavigateToOptimizationGuide: () -> Unit,
     onNavigateToServiceStore: () -> Unit,
+    onReconfigure: (String) -> Unit,
+    serviceStoreViewModel: ServiceStoreViewModel?,
     onResetServer: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -659,55 +670,69 @@ private fun CompletedPhase(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // AI 비서 설치 카드
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = colorScheme.primaryContainer.copy(alpha = 0.3f),
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+        // AI 비서 카드: 설치된 서비스가 있으면 상태 카드, 없으면 설치 안내
+        val servicesList = serviceStoreViewModel?.services?.collectAsState()?.value ?: emptyList()
+        val installedService = servicesList.firstOrNull {
+            it.status != ServiceStatus.NOT_INSTALLED
+        }
+
+        if (installedService != null) {
+            ServiceStatusCard(
+                service = installedService,
+                serviceStoreViewModel = serviceStoreViewModel!!,
+                onNavigateToServiceStore = onNavigateToServiceStore,
+                onReconfigure = onReconfigure,
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = colorScheme.primaryContainer.copy(alpha = 0.3f),
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             ) {
-                Text(
-                    text = "AI 비서",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colorScheme.onSurface,
-                    textAlign = TextAlign.Center,
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "서버에 AI 비서를 설치하고\nTelegram으로 대화해 보세요",
-                    fontSize = 14.sp,
-                    color = extColors.textSecondary,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 20.sp,
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = onNavigateToServiceStore,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colorScheme.primary,
-                        contentColor = colorScheme.onPrimary,
-                    ),
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = "AI 비서 설치하기",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
+                        text = "AI 비서",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "서버에 AI 비서를 설치하고\nTelegram으로 대화해 보세요",
+                        fontSize = 14.sp,
+                        color = extColors.textSecondary,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp,
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = onNavigateToServiceStore,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colorScheme.primary,
+                            contentColor = colorScheme.onPrimary,
+                        ),
+                    ) {
+                        Text(
+                            text = "AI 비서 설치하기",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }
@@ -954,6 +979,202 @@ private fun CompletedPhase(
         )
 
         Spacer(modifier = Modifier.height(40.dp))
+    }
+}
+
+@Composable
+private fun ServiceStatusCard(
+    service: InstalledService,
+    serviceStoreViewModel: ServiceStoreViewModel,
+    onNavigateToServiceStore: () -> Unit,
+    onReconfigure: (String) -> Unit = {},
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extColors = PocketServerExtendedTheme.colors
+
+    val statusColor = when (service.status) {
+        ServiceStatus.RUNNING -> Color(0xFF4CAF50)
+        ServiceStatus.STOPPED, ServiceStatus.INSTALLED -> Color(0xFF9E9E9E)
+        ServiceStatus.ERROR -> Color(0xFFF44336)
+        ServiceStatus.INSTALLING, ServiceStatus.CONFIGURING -> Color(0xFFFF9800)
+        else -> Color(0xFF9E9E9E)
+    }
+    val statusText = when (service.status) {
+        ServiceStatus.RUNNING -> "실행 중"
+        ServiceStatus.STOPPED -> "중지됨"
+        ServiceStatus.INSTALLED -> "중지됨"
+        ServiceStatus.ERROR -> "오류"
+        ServiceStatus.INSTALLING -> "설치 중..."
+        ServiceStatus.CONFIGURING -> "처리 중..."
+        else -> ""
+    }
+    val config = remember(service.serviceId, service.status) {
+        serviceStoreViewModel.getServiceConfig(service.serviceId)
+    }
+    val providerDisplay = config?.get("provider")?.let { id ->
+        ServiceCatalog.providers.find { it.id == id }?.displayName?.substringBefore(" (") ?: id.replaceFirstChar { it.uppercase() }
+    } ?: ""
+    val modelDisplay = config?.get("model") ?: ""
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = extColors.cardBackground,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "AI 비서",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colorScheme.onSurface,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(statusColor),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = statusText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = statusColor,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = service.name,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = colorScheme.onSurface,
+            )
+
+            if (modelDisplay.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "모델: $modelDisplay",
+                    fontSize = 13.sp,
+                    color = extColors.textSecondary,
+                )
+            }
+            if (providerDisplay.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Provider: $providerDisplay",
+                    fontSize = 13.sp,
+                    color = extColors.textSecondary,
+                )
+            }
+
+            if (service.status == ServiceStatus.ERROR && service.errorMessage != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = service.errorMessage,
+                    fontSize = 12.sp,
+                    color = Color(0xFFF44336),
+                    lineHeight = 16.sp,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (service.status) {
+                    ServiceStatus.RUNNING -> {
+                        OutlinedButton(
+                            onClick = { serviceStoreViewModel.restartService(service.serviceId) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "재시작", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                        OutlinedButton(
+                            onClick = { serviceStoreViewModel.stopService(service.serviceId) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = extColors.statusRed),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, extColors.statusRed.copy(alpha = 0.5f)),
+                        ) {
+                            Text(text = "중지", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                        OutlinedButton(
+                            onClick = { onReconfigure(service.serviceId) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "설정", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    ServiceStatus.STOPPED, ServiceStatus.INSTALLED -> {
+                        Button(
+                            onClick = { serviceStoreViewModel.startService(service.serviceId) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "시작", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                        OutlinedButton(
+                            onClick = { onReconfigure(service.serviceId) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "설정 변경", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    ServiceStatus.ERROR -> {
+                        OutlinedButton(
+                            onClick = { serviceStoreViewModel.restartService(service.serviceId) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "재시작", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                        OutlinedButton(
+                            onClick = { onReconfigure(service.serviceId) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "설정 변경", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    ServiceStatus.INSTALLING, ServiceStatus.CONFIGURING -> {
+                        Button(
+                            onClick = {},
+                            enabled = false,
+                            modifier = Modifier.fillMaxWidth().height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "처리 중...", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    else -> {
+                        OutlinedButton(
+                            onClick = onNavigateToServiceStore,
+                            modifier = Modifier.fillMaxWidth().height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(text = "서비스 관리", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -141,14 +141,31 @@ os.networkInterfaces = function() {
     }
 
     override suspend fun configure(inputs: Map<String, String>) = withContext(Dispatchers.IO) {
-        val apiKey = inputs["gemini_api_key"] ?: throw IllegalArgumentException("Gemini API Key required")
+        val provider = inputs["provider"] ?: "gemini"
+        val model = inputs["model"] ?: "gemini-2.5-flash-lite"
+        val apiKey = inputs["api_key"] ?: throw IllegalArgumentException("API Key required")
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
 
-        // Step 1: .env 먼저 작성 (openclaw onboard가 GEMINI_API_KEY를 env에서 읽음)
+        val envVarName = when (provider) {
+            "groq" -> "GROQ_API_KEY"
+            else -> "GEMINI_API_KEY"
+        }
+
+        val authChoice = when (provider) {
+            "groq" -> "groq-api-key"
+            else -> "gemini-api-key"
+        }
+
+        val qualifiedModel = when (provider) {
+            "groq" -> "groq/$model"
+            else -> "google/$model"
+        }
+
+        // Step 1: .env 먼저 작성 (openclaw onboard가 env에서 API key를 읽음)
         val envFile = File(rootfsPath, "root/.openclaw/.env")
         envFile.parentFile?.mkdirs()
-        envFile.writeText("GEMINI_API_KEY=$apiKey\n")
-        Log.i(TAG, "Wrote GEMINI_API_KEY to .env")
+        envFile.writeText("$envVarName=$apiKey\n")
+        Log.i(TAG, "Wrote $envVarName to .env")
 
         // PRoot 명령 공통 프리앰블: .env 소싱 + bionic bypass
         val preamble = "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
@@ -160,27 +177,56 @@ os.networkInterfaces = function() {
             "/bin/bash", "-c",
             preamble +
             "openclaw onboard --non-interactive " +
-                "--auth-choice gemini-api-key " +
+                "--accept-risk " +
+                "--auth-choice $authChoice " +
                 "--mode local " +
                 "--workspace /root/.openclaw/workspace " +
-                "--skip-skills 2>&1"
+                "--skip-skills " +
+                "--skip-channels " +
+                "--skip-health " +
+                "--skip-daemon 2>&1"
         )
 
-        if (onboardResult.isSuccess) {
-            Log.i(TAG, "openclaw onboard succeeded")
+        // onboard는 config를 성공적으로 작성해도 daemon 단계에서 exit 1을 반환할 수 있음 (PRoot에서 systemd 없음)
+        // exit code 대신 config 파일 존재 + 크기로 성공 판단
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        val onboardSuccess = configFile.exists() && configFile.length() > 100
+
+        if (onboardSuccess) {
+            Log.i(TAG, "openclaw onboard succeeded (config file exists, ${configFile.length()} bytes)")
         } else {
-            Log.w(TAG, "openclaw onboard failed, falling back to manual config")
+            Log.w(TAG, "openclaw onboard failed (config file missing or too small), falling back to manual config")
             Log.w(TAG, "onboard output: ${cleanOutput(onboardResult.output.takeLast(500))}")
-            writeManualConfig(apiKey, telegramToken)
+            writeManualConfig(provider, qualifiedModel, telegramToken)
             return@withContext Unit
         }
 
-        // Step 3: Telegram 채널 설정 (onboard는 채널 설정을 하지 않음)
+        // Step 3: 모델 설정 (onboard는 자체 기본 모델을 사용하므로 사용자 선택 모델로 덮어쓰기)
+        val modelResult = prootManager.exec(
+            "/bin/bash", "-c",
+            preamble + "openclaw config set agents.defaults.model.primary \"$qualifiedModel\" 2>&1"
+        )
+        if (!modelResult.isSuccess) {
+            Log.w(TAG, "config set model failed, injecting directly")
+            injectModelConfig(qualifiedModel)
+        }
+
+        // Step 4: compaction 설정 (reserveTokensFloor 필수 — Groq 모델 context overflow 방지)
+        val compactionResult = prootManager.exec(
+            "/bin/bash", "-c",
+            preamble + "openclaw config set agents.defaults.compaction.reserveTokensFloor 4000 2>&1"
+        )
+        if (!compactionResult.isSuccess) {
+            Log.w(TAG, "config set reserveTokensFloor failed, injecting directly")
+            injectCompactionConfig()
+        }
+
+        // Step 5: Telegram 채널 설정 (onboard는 채널 설정을 하지 않음)
         val telegramCommands = listOf(
             "openclaw config set channels.telegram.enabled true",
             "openclaw config set channels.telegram.botToken \"$telegramToken\"",
             "openclaw config set channels.telegram.dmPolicy open",
-            "openclaw config set channels.telegram.allowFrom '[\"*\"]'"
+            "openclaw config set channels.telegram.allowFrom '[\"*\"]'",
         )
 
         for (cmd in telegramCommands) {
@@ -193,14 +239,15 @@ os.networkInterfaces = function() {
             }
         }
 
-        Log.i(TAG, "OpenClaw configured via CLI (onboard + config set)")
+        Log.i(TAG, "OpenClaw configured via CLI")
         Unit
     }
 
-    /**
-     * Fallback Tier 3: openclaw onboard 실패 시 수동 JSON 작성
-     */
-    private fun writeManualConfig(apiKey: String, telegramToken: String) {
+    private fun writeManualConfig(
+        provider: String,
+        qualifiedModel: String,
+        telegramToken: String,
+    ) {
         val config = JSONObject().apply {
             put("gateway", JSONObject().apply {
                 put("mode", "local")
@@ -208,10 +255,11 @@ os.networkInterfaces = function() {
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
                     put("model", JSONObject().apply {
-                        put("primary", "google/gemini-2.5-flash-lite")
-                        put("fallbacks", org.json.JSONArray().apply {
-                            put("google/gemini-2.5-flash")
-                        })
+                        put("primary", qualifiedModel)
+                        put("fallbacks", org.json.JSONArray())
+                    })
+                    put("compaction", JSONObject().apply {
+                        put("reserveTokensFloor", 4000)
                     })
                 })
             })
@@ -230,7 +278,7 @@ os.networkInterfaces = function() {
         val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
         configFile.parentFile?.mkdirs()
         configFile.writeText(config.toString(2))
-        Log.i(TAG, "Manual fallback: wrote openclaw.json directly")
+        Log.i(TAG, "Manual fallback: wrote openclaw.json directly (provider=$provider, model=$qualifiedModel)")
     }
 
     /**
@@ -248,10 +296,56 @@ os.networkInterfaces = function() {
                 put("allowFrom", org.json.JSONArray().apply { put("*") })
             })
             config.put("channels", channels)
+
+            // reserveTokensFloor도 함께 보장
+            val agents = if (config.has("agents")) config.getJSONObject("agents") else JSONObject().also { config.put("agents", it) }
+            val defaults = if (agents.has("defaults")) agents.getJSONObject("defaults") else JSONObject().also { agents.put("defaults", it) }
+            val compaction = if (defaults.has("compaction")) defaults.getJSONObject("compaction") else JSONObject().also { defaults.put("compaction", it) }
+            compaction.put("reserveTokensFloor", 4000)
+
             configFile.writeText(config.toString(2))
-            Log.i(TAG, "Telegram config injected into existing openclaw.json")
+            Log.i(TAG, "Telegram config + reserveTokensFloor injected into existing openclaw.json")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to inject Telegram config", e)
+        }
+    }
+
+    /**
+     * Fallback: config set model 실패 시 openclaw.json에 모델 직접 주입
+     */
+    private fun injectModelConfig(qualifiedModel: String) {
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        try {
+            val config = if (configFile.exists()) JSONObject(configFile.readText()) else return
+            val agents = if (config.has("agents")) config.getJSONObject("agents") else JSONObject().also { config.put("agents", it) }
+            val defaults = if (agents.has("defaults")) agents.getJSONObject("defaults") else JSONObject().also { agents.put("defaults", it) }
+            // model은 객체: {"primary": "...", "fallbacks": []}
+            defaults.put("model", JSONObject().apply {
+                put("primary", qualifiedModel)
+                put("fallbacks", org.json.JSONArray())
+            })
+            configFile.writeText(config.toString(2))
+            Log.i(TAG, "Model injected into openclaw.json: $qualifiedModel")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to inject model config", e)
+        }
+    }
+
+    /**
+     * Fallback: config set 실패 시 openclaw.json에 reserveTokensFloor 직접 주입
+     */
+    private fun injectCompactionConfig() {
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        try {
+            val config = if (configFile.exists()) JSONObject(configFile.readText()) else return
+            val agents = if (config.has("agents")) config.getJSONObject("agents") else JSONObject().also { config.put("agents", it) }
+            val defaults = if (agents.has("defaults")) agents.getJSONObject("defaults") else JSONObject().also { agents.put("defaults", it) }
+            val compaction = if (defaults.has("compaction")) defaults.getJSONObject("compaction") else JSONObject().also { defaults.put("compaction", it) }
+            compaction.put("reserveTokensFloor", 4000)
+            configFile.writeText(config.toString(2))
+            Log.i(TAG, "reserveTokensFloor injected into openclaw.json")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to inject compaction config", e)
         }
     }
 
@@ -352,6 +446,53 @@ os.networkInterfaces = function() {
         val globalNodeModules = File(rootfsPath, "usr/lib/node_modules/openclaw")
         val localNodeModules = File(rootfsPath, "usr/local/lib/node_modules/openclaw")
         return globalNodeModules.exists() || localNodeModules.exists()
+    }
+
+    override fun readCurrentConfig(): Map<String, String>? {
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        if (!configFile.exists()) return null
+        return try {
+            val json = JSONObject(configFile.readText())
+            val modelObj = json.optJSONObject("agents")?.optJSONObject("defaults")?.opt("model")
+            val model = when (modelObj) {
+                is JSONObject -> modelObj.optString("primary", "")
+                is String -> modelObj
+                else -> ""
+            }
+            val provider = when {
+                model.startsWith("groq/") -> "groq"
+                model.startsWith("google/") -> "gemini"
+                else -> ""
+            }
+            val displayModel = model.removePrefix("groq/").removePrefix("google/")
+
+            // api_key: .env 파일에서 읽기
+            val apiKey = try {
+                val envFile = File(rootfsPath, "root/.openclaw/.env")
+                if (envFile.exists()) {
+                    envFile.readLines()
+                        .firstOrNull { it.contains("API_KEY=") }
+                        ?.substringAfter("=")
+                        ?.trim()
+                        ?: ""
+                } else ""
+            } catch (_: Exception) { "" }
+
+            // telegram_token: openclaw.json에서 읽기
+            val telegramToken = json.optJSONObject("channels")
+                ?.optJSONObject("telegram")
+                ?.optString("botToken", "") ?: ""
+
+            mapOf(
+                "provider" to provider,
+                "model" to displayModel,
+                "api_key" to apiKey,
+                "telegram_token" to telegramToken,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read OpenClaw config", e)
+            null
+        }
     }
 
     /**

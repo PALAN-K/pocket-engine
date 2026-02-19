@@ -73,6 +73,22 @@ Spark 무료 플랜 제한. APK는 반드시 R2 경유.
 | 다운로드 페이지 | `https://pocket-server-palank.web.app` |
 | version.json | `https://pocket-server-palank.web.app/version.json` |
 
+## Engine → PALAN-K 공개 레포
+
+Engine 앱은 PALAN-K 조직의 공개 레포에도 배포한다.
+
+```bash
+# remote 추가 (최초 1회)
+git remote add palan-k https://github.com/PALAN-K/pocket-engine.git
+
+# 푸시
+git push palan-k main
+```
+
+- 레포: https://github.com/PALAN-K/pocket-engine.git (public)
+- origin(`naegeon/pocket-server`)과 별도로 관리
+- R2 업로드 후 커밋 → palan-k 레포에도 푸시
+
 ## R2 상세
 - 버킷: `pocketserver-apk` (퍼블릭)
 - Wrangler 인증 만료 시: `npx wrangler login`
@@ -153,8 +169,8 @@ node ssh-exec.js "source /root/.openclaw/.env && NODE_OPTIONS='--require /usr/lo
 
 ## 시나리오별 최소 체크리스트
 
-**A. Engine만 (버전 유지)**: assembleRelease → R2 `--remote` → curl 확인
+**A. Engine만 (버전 유지)**: assembleRelease → R2 `--remote` → curl 확인 → git commit + push palan-k
 
-**B. Engine만 (버전 업)**: 3곳 버전 수정 → assembleRelease → R2 `--remote` → `firebase deploy --only hosting`
+**B. Engine만 (버전 업)**: 3곳 버전 수정 → assembleRelease → R2 `--remote` → `firebase deploy --only hosting` → git commit + push palan-k
 
-**C. 양쪽 (버전 업)**: 3곳 버전 수정 → 양쪽 assembleRelease → R2 `--remote` → Play Console 업로드 → `firebase deploy --only hosting`
+**C. 양쪽 (버전 업)**: 3곳 버전 수정 → 양쪽 assembleRelease → R2 `--remote` → Play Console 업로드 → `firebase deploy --only hosting` → git commit + push palan-k

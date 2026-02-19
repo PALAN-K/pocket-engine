@@ -5,8 +5,10 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kr.co.palank.pocketserver.catalog.ServiceCatalog
 import kr.co.palank.pocketserver.catalog.ServiceInstaller
@@ -126,6 +128,56 @@ class ServiceManager(private val context: Context) {
         }
     }
 
+    fun reconfigureService(serviceId: String, inputs: Map<String, String>) {
+        val installer = getOrCreateInstaller(serviceId)
+        updateServiceStatus(serviceId, ServiceStatus.CONFIGURING)
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                // Stop if running
+                if (installer.isRunning()) {
+                    installer.stop()
+                    delay(1000)
+                }
+                // Rewrite config
+                installer.configure(inputs)
+                // Restart
+                val started = installer.start()
+                if (started) {
+                    updateServiceStatus(serviceId, ServiceStatus.RUNNING)
+                    Log.i(TAG, "Service $serviceId reconfigured and restarted")
+                } else {
+                    updateServiceStatus(serviceId, ServiceStatus.ERROR, "재시작 실패")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Reconfigure failed for $serviceId", e)
+                updateServiceStatus(serviceId, ServiceStatus.ERROR, e.message)
+            }
+        }
+    }
+
+    fun restartService(serviceId: String) {
+        val installer = getOrCreateInstaller(serviceId)
+        updateServiceStatus(serviceId, ServiceStatus.CONFIGURING)
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                installer.stop()
+                delay(1000)
+                val started = installer.start()
+                if (started) {
+                    updateServiceStatus(serviceId, ServiceStatus.RUNNING)
+                    Log.i(TAG, "Service $serviceId restarted")
+                } else {
+                    updateServiceStatus(serviceId, ServiceStatus.ERROR, "재시작 실패")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Restart failed for $serviceId", e)
+                updateServiceStatus(serviceId, ServiceStatus.ERROR, e.message)
+            }
+        }
+    }
+
     fun startAllInstalled() {
         scope.launch(Dispatchers.IO) {
             _services.value.filter { it.status == ServiceStatus.INSTALLED || it.status == ServiceStatus.STOPPED }
@@ -151,9 +203,20 @@ class ServiceManager(private val context: Context) {
         }
     }
 
+    fun getServiceConfig(serviceId: String): Map<String, String>? {
+        return try {
+            getOrCreateInstaller(serviceId).readCurrentConfig()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read config for $serviceId", e)
+            null
+        }
+    }
+
     private fun updateServiceStatus(serviceId: String, status: ServiceStatus, error: String? = null) {
-        _services.value = _services.value.map {
-            if (it.serviceId == serviceId) it.copy(status = status, errorMessage = error) else it
+        _services.update { list ->
+            list.map {
+                if (it.serviceId == serviceId) it.copy(status = status, errorMessage = error) else it
+            }
         }
     }
 

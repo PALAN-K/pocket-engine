@@ -116,6 +116,11 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToServiceStore = {
                                     currentScreen = "service_store"
                                 },
+                                onReconfigure = { serviceId ->
+                                    serviceStoreViewModel.startReconfigure(serviceId)
+                                    currentScreen = "service_setup"
+                                },
+                                serviceStoreViewModel = serviceStoreViewModel,
                             )
 
                             "optimization_guide" -> OptimizationGuideScreen(
@@ -132,6 +137,10 @@ class MainActivity : ComponentActivity() {
                                     serviceStoreViewModel.startSetup(serviceId)
                                     currentScreen = "service_setup"
                                 },
+                                onReconfigure = { serviceId ->
+                                    serviceStoreViewModel.startReconfigure(serviceId)
+                                    currentScreen = "service_setup"
+                                },
                                 onBack = {
                                     currentScreen = "setup"
                                 },
@@ -140,7 +149,10 @@ class MainActivity : ComponentActivity() {
                             "service_setup" -> ServiceSetupScreen(
                                 viewModel = serviceStoreViewModel,
                                 onComplete = {
-                                    currentScreen = "setup"
+                                    currentScreen = "service_store"
+                                },
+                                onCancel = {
+                                    currentScreen = "service_store"
                                 },
                             )
                         }

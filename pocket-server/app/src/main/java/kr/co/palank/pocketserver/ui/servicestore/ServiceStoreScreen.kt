@@ -45,6 +45,7 @@ import kr.co.palank.pocketserver.ui.theme.PocketServerExtendedTheme
 fun ServiceStoreScreen(
     viewModel: ServiceStoreViewModel,
     onStartSetup: (String) -> Unit,
+    onReconfigure: (String) -> Unit = {},
     onBack: () -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -191,33 +192,69 @@ fun ServiceStoreScreen(
                                 }
                             }
                             ServiceStatus.RUNNING -> {
-                                OutlinedButton(
-                                    onClick = { viewModel.stopService(serviceDef.id) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(44.dp),
-                                    shape = RoundedCornerShape(12.dp),
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Text(
-                                        text = "중지",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium,
-                                    )
+                                    OutlinedButton(
+                                        onClick = { viewModel.stopService(serviceDef.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ) {
+                                        Text(
+                                            text = "중지",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onReconfigure(serviceDef.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ) {
+                                        Text(
+                                            text = "설정 변경",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                    }
                                 }
                             }
                             ServiceStatus.INSTALLED, ServiceStatus.STOPPED -> {
-                                Button(
-                                    onClick = { viewModel.startService(serviceDef.id) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(44.dp),
-                                    shape = RoundedCornerShape(12.dp),
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Text(
-                                        text = "시작",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium,
-                                    )
+                                    Button(
+                                        onClick = { viewModel.startService(serviceDef.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ) {
+                                        Text(
+                                            text = "시작",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onReconfigure(serviceDef.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ) {
+                                        Text(
+                                            text = "설정 변경",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                    }
                                 }
                             }
                             ServiceStatus.INSTALLING, ServiceStatus.CONFIGURING -> {
@@ -230,7 +267,7 @@ fun ServiceStoreScreen(
                                     shape = RoundedCornerShape(12.dp),
                                 ) {
                                     Text(
-                                        text = "설치 중...",
+                                        text = if (status == ServiceStatus.INSTALLING) "설치 중..." else "처리 중...",
                                         fontSize = 15.sp,
                                     )
                                 }
@@ -243,18 +280,36 @@ fun ServiceStoreScreen(
                                         color = extColors.statusRed,
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    Button(
-                                        onClick = { onStartSetup(serviceDef.id) },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(44.dp),
-                                        shape = RoundedCornerShape(12.dp),
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
-                                        Text(
-                                            text = "다시 시도",
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Medium,
-                                        )
+                                        Button(
+                                            onClick = { onStartSetup(serviceDef.id) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(44.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                        ) {
+                                            Text(
+                                                text = "다시 시도",
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = { onReconfigure(serviceDef.id) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(44.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                        ) {
+                                            Text(
+                                                text = "설정 변경",
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                        }
                                     }
                                 }
                             }
