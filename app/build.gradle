@@ -1,0 +1,184 @@
+
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+    id "com.google.gms.google-services"
+    id "com.google.firebase.crashlytics"
+}
+
+// PRoot 바이너리 다운로드 태스크
+def prootAssetsDir = file("src/main/assets/proot")
+def prootTarball = file("${buildDir}/proot/proot-android-aarch64.tar.gz")
+def prootDownloadUrl = "https://raw.githubusercontent.com/green-green-avk/build-proot-android/master/packages/proot-android-aarch64.tar.gz"
+
+tasks.register("downloadProot") {
+    description = "Downloads PRoot ARM64 binary for Android"
+    outputs.dir(prootAssetsDir)
+
+    doLast {
+        if (file("${prootAssetsDir}/proot").exists()) {
+            logger.lifecycle("PRoot binary already exists in assets, skipping download")
+            return
+        }
+
+        prootTarball.parentFile.mkdirs()
+        prootAssetsDir.mkdirs()
+
+        logger.lifecycle("Downloading PRoot binary from ${prootDownloadUrl}...")
+        new URL(prootDownloadUrl).withInputStream { input ->
+            prootTarball.withOutputStream { output ->
+                output << input
+            }
+        }
+
+        logger.lifecycle("Extracting PRoot binary...")
+        exec {
+            if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                commandLine "cmd", "/c", "tar", "xzf", prootTarball.absolutePath, "-C", prootAssetsDir.absolutePath
+            } else {
+                commandLine "tar", "xzf", prootTarball.absolutePath, "-C", prootAssetsDir.absolutePath
+            }
+        }
+
+        // tarball 구조: root/bin/proot, root/libexec/proot/loader, root/libexec/proot/loader32
+        // 모든 필요 파일을 assets/proot/ 루트로 플랫하게 복사
+        def extractedProot = fileTree(prootAssetsDir).matching { include "**/bin/proot" }.files.find()
+        if (extractedProot != null) {
+            copy { from extractedProot; into prootAssetsDir }
+        }
+        def extractedLoader = fileTree(prootAssetsDir).matching { include "**/libexec/proot/loader" }.files.find()
+        if (extractedLoader != null) {
+            copy { from extractedLoader; into prootAssetsDir }
+        }
+        def extractedLoader32 = fileTree(prootAssetsDir).matching { include "**/libexec/proot/loader32" }.files.find()
+        if (extractedLoader32 != null) {
+            copy { from extractedLoader32; into prootAssetsDir }
+        }
+        // 중간 디렉토리 정리 (root/ 폴더)
+        prootAssetsDir.listFiles()?.each { f ->
+            if (f.isDirectory()) f.deleteDir()
+        }
+
+        if (!file("${prootAssetsDir}/proot").exists()) {
+            throw new RuntimeException("PRoot binary not found after extraction")
+        }
+        if (!file("${prootAssetsDir}/loader").exists()) {
+            throw new RuntimeException("PRoot loader not found after extraction")
+        }
+        logger.lifecycle("PRoot binary + loader ready at ${prootAssetsDir}/")
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("downloadProot")
+}
+
+// Load signing keystore properties (safe if file doesn't exist yet)
+def keystorePropertiesFile = rootProject.file("../keystore/keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace "kr.co.palank.pocketserver"
+    compileSdk 34
+
+    // Signing config — shared between pocket-server and pocket-monitor for IPC signature verification
+    if (keystorePropertiesFile.exists()) {
+        signingConfigs {
+            release {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
+    defaultConfig {
+        applicationId "kr.co.palank.pocketserver"
+        minSdk 26
+        targetSdk 34
+        versionCode 3
+        versionName "1.1.1"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+    buildFeatures {
+        compose true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion "1.5.1"
+    }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        // PRoot/busybox 등 ELF 바이너리를 strip하지 않도록 설정
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+    packagingOptions {
+        doNotStrip '**/*.so'
+    }
+}
+
+dependencies {
+    implementation "androidx.core:core-ktx:1.12.0"
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.6.2"
+    implementation "com.google.android.material:material:1.11.0"
+
+    // Jetpack Compose 핵심
+    implementation "androidx.activity:activity-compose:1.8.2"
+    implementation platform("androidx.compose:compose-bom:2023.10.01")
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.ui:ui-graphics"
+    implementation "androidx.compose.ui:ui-tooling-preview"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.material:material-icons-core"
+
+    // 모니터링 및 상태 관리
+    implementation "androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2"
+    implementation "androidx.datastore:datastore-preferences:1.0.0"
+
+    // rootfs tar.xz 압축 해제 + .deb ar 아카이브 파싱
+    implementation "org.apache.commons:commons-compress:1.26.0"
+    implementation "org.tukaani:xz:1.9"
+    // WorkManager (WatchdogWorker)
+    implementation "androidx.work:work-runtime-ktx:2.9.0"
+
+    // Firebase Crashlytics
+    implementation platform("com.google.firebase:firebase-bom:32.7.0")
+    implementation "com.google.firebase:firebase-crashlytics-ktx"
+    implementation "com.google.firebase:firebase-analytics-ktx"
+
+    testImplementation "junit:junit:4.13.2"
+    androidTestImplementation "androidx.test.ext:junit:1.1.5"
+    androidTestImplementation "androidx.test.espresso:espresso-core:3.5.1"
+    androidTestImplementation platform("androidx.compose:compose-bom:2023.10.01")
+    androidTestImplementation "androidx.compose.ui:ui-test-junit4"
+    debugImplementation "androidx.compose.ui:ui-tooling"
+    debugImplementation "androidx.compose.ui:ui-test-manifest"
+}
