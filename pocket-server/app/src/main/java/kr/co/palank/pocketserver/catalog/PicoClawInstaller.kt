@@ -117,6 +117,9 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
                 put("host", "0.0.0.0")
                 put("port", 18790)
             })
+            put("commands", JSONObject().apply {
+                put("restart", true)
+            })
         }
 
         val configFile = File(rootfsPath, "root/.picoclaw/config.json")
@@ -245,6 +248,9 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
                 put("host", "0.0.0.0")
                 put("port", 18790)
             })
+            put("commands", JSONObject().apply {
+                put("restart", true)
+            })
         }
 
         val configFile = File(rootfsPath, "root/.picoclaw/config.json")
@@ -296,12 +302,13 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             "pkill -f 'picoclaw gateway' 2>/dev/null; sleep 1"
         )
 
-        // config 존재 확인
-        val configExists = File(rootfsPath, "root/.picoclaw/config.json").exists()
-        if (!configExists) {
+        // config 존재 확인 + 마이그레이션
+        val configFile = File(rootfsPath, "root/.picoclaw/config.json")
+        if (!configFile.exists()) {
             Log.w(TAG, "PicoClaw config not found, skipping start")
             return@withContext false
         }
+        patchCommandsRestart(configFile)
 
         // killOnExit=false: PRoot 세션이 PicoClaw와 함께 유지됨
         val cmd = prootManager.buildEnvWrappedCommand(
@@ -406,6 +413,21 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read PicoClaw config", e)
             null
+        }
+    }
+
+    /** 기존 config에 commands.restart=true가 없으면 패치 (마이그레이션) */
+    private fun patchCommandsRestart(configFile: File) {
+        try {
+            val json = JSONObject(configFile.readText())
+            val commands = json.optJSONObject("commands")
+            if (commands == null || !commands.optBoolean("restart", false)) {
+                json.put("commands", JSONObject().apply { put("restart", true) })
+                configFile.writeText(json.toString(2))
+                Log.i(TAG, "Patched commands.restart=true into existing config")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to patch commands.restart", e)
         }
     }
 
