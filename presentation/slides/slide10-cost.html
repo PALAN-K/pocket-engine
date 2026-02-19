@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html { background: #000000; }
+body {
+  width: 720pt; height: 405pt; margin: 0; padding: 0;
+  background: #000000; font-family: Arial, sans-serif;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+}
+h1 {
+  color: #FFFFFF; font-size: 28pt; text-align: center;
+  margin: 0 0 30pt;
+}
+.table-wrap {
+  margin: 0 60pt;
+}
+.row {
+  display: flex; margin: 3pt 0;
+}
+.cell {
+  background: #1A1A1A; padding: 12pt 15pt; margin: 0 2pt;
+  border-radius: 4pt;
+}
+.cell-header {
+  background: #EB0028; padding: 12pt 15pt; margin: 0 2pt;
+  border-radius: 4pt;
+}
+.c1 { width: 160pt; }
+.c2 { width: 120pt; }
+.c3 { width: 120pt; }
+.c4 { width: 120pt; }
+p { color: #FFFFFF; font-size: 13pt; margin: 0; }
+p.gray { color: #666666; }
+p.red { color: #EB0028; font-weight: bold; font-size: 16pt; }
+p.strike { color: #666666; text-decoration: line-through; }
+</style>
+</head>
+<body>
+  <h1>비용 비교 — <span style="color:#EB0028;">연간 기준</span></h1>
+  <div class="table-wrap">
+    <div class="row">
+      <div class="cell-header c1"><p>솔루션</p></div>
+      <div class="cell-header c2"><p>하드웨어</p></div>
+      <div class="cell-header c3"><p>월 비용</p></div>
+      <div class="cell-header c4"><p>연간 총비용</p></div>
+    </div>
+    <div class="row">
+      <div class="cell c1"><p>PocketServer</p></div>
+      <div class="cell c2"><p>$0 (구형폰)</p></div>
+      <div class="cell c3"><p>$0</p></div>
+      <div class="cell c4"><p class="red">$0</p></div>
+    </div>
+    <div class="row">
+      <div class="cell c1"><p class="gray">VPS (클라우드)</p></div>
+      <div class="cell c2"><p class="gray">$0</p></div>
+      <div class="cell c3"><p class="strike">$4-6/월</p></div>
+      <div class="cell c4"><p class="strike">$48-72</p></div>
+    </div>
+    <div class="row">
+      <div class="cell c1"><p class="gray">Raspberry Pi</p></div>
+      <div class="cell c2"><p class="strike">$50-100</p></div>
+      <div class="cell c3"><p class="gray">~$1</p></div>
+      <div class="cell c4"><p class="strike">$62-112</p></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html { background: #000000; }
+body {
+  width: 720pt; height: 405pt; margin: 0; padding: 0;
+  background: #000000; font-family: Arial, sans-serif;
+  display: flex; flex-direction: column;
+}
+h1 {
+  color: #FFFFFF; font-size: 28pt; text-align: center;
+  margin: 25pt 0 20pt;
+}
+h1 span { color: #EB0028; }
+.layers {
+  display: flex; flex-direction: column; align-items: center;
+  margin: 0 80pt;
+}
+.layer {
+  background: #1A1A1A; border-radius: 6pt;
+  margin: 3pt 0; padding: 8pt 20pt;
+  width: 450pt; display: flex; align-items: center;
+}
+.num {
+  background: #EB0028; border-radius: 50%;
+  width: 22pt; height: 22pt; min-width: 22pt;
+  display: flex; align-items: center; justify-content: center;
+}
+p.n { color: #FFFFFF; font-size: 11pt; margin: 0; text-align: center; }
+p.label { color: #FFFFFF; font-size: 13pt; margin: 0 0 0 12pt; }
+p.desc { color: #666666; font-size: 10pt; margin: 0 0 0 8pt; }
+</style>
+</head>
+<body>
+  <h1><span>7</span>계층 Keep-Alive 시스템</h1>
+  <div class="layers">
+    <div class="layer">
+      <div class="num"><p class="n">1</p></div>
+      <p class="label">Foreground Service</p>
+      <p class="desc">OS 프로세스 보호</p>
+    </div>
+    <div class="layer">
+      <div class="num"><p class="n">2</p></div>
+      <p class="label">Wake Lock</p>
+      <p class="desc">화면 꺼져도 CPU 유지</p>
+    </div>
+    <div class="layer">
+      <div class="num"><p class="n">3</p></div>
+      <p class="label">WiFi Lock</p>
+      <p class="desc">네트워크 상시 연결</p>
+    </div>
+    <div class="layer">
+      <div class="num"><p class="n">4</p></div>
+      <p class="label">Battery Optimization Exempt</p>
+      <p class="desc">Doze 모드 우회</p>
+    </div>
+    <div class="layer">
+      <div class="num"><p class="n">5</p></div>
+      <p class="label">Auto Restart</p>
+      <p class="desc">종료 시 자동 재시작</p>
+    </div>
+    <div class="layer">
+      <div class="num"><p class="n">6</p></div>
+      <p class="label">Boot Receiver</p>
+      <p class="desc">재부팅 시 자동 시작</p>
+    </div>
+    <div class="layer">
+      <div class="num"><p class="n">7</p></div>
+      <p class="label">Manufacturer Optimization</p>
+      <p class="desc">삼성/샤오미/화웨이 대응</p>
+    </div>
+  </div>
+</body>
+</html>

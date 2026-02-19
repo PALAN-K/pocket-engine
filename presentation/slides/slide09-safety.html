@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html { background: #000000; }
+body {
+  width: 720pt; height: 405pt; margin: 0; padding: 0;
+  background: #000000; font-family: Arial, sans-serif;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+}
+h1 {
+  color: #FFFFFF; font-size: 36pt; text-align: center;
+  margin: 0 60pt; line-height: 1.3;
+}
+h1 span { color: #EB0028; }
+.cards {
+  display: flex; margin: 30pt 40pt 0;
+}
+.card {
+  background: #1A1A1A; border-radius: 10pt;
+  padding: 20pt; margin: 0 10pt; width: 190pt; text-align: center;
+}
+h3 { color: #FFFFFF; font-size: 14pt; margin: 0 0 8pt; }
+p { color: #999999; font-size: 11pt; margin: 0; line-height: 1.5; }
+p.temp { color: #EB0028; font-size: 36pt; margin: 0 0 5pt; font-weight: bold; }
+p.temp-warn { color: #F59E0B; font-size: 36pt; margin: 0 0 5pt; font-weight: bold; }
+p.temp-ok { color: #22C55E; font-size: 36pt; margin: 0 0 5pt; font-weight: bold; }
+</style>
+</head>
+<body>
+  <h1>안전이 <span>최우선</span>입니다</h1>
+  <div class="cards">
+    <div class="card">
+      <p class="temp-ok">40°C</p>
+      <h3>정상</h3>
+      <p>서버 정상 가동</p>
+    </div>
+    <div class="card">
+      <p class="temp-warn">45°C</p>
+      <h3>주의</h3>
+      <p>푸시 알림 경고</p>
+    </div>
+    <div class="card">
+      <p class="temp">50°C</p>
+      <h3>자동 정지</h3>
+      <p>서버 즉시 중단<br>온도 복귀 시 재시작</p>
+    </div>
+  </div>
+</body>
+</html>
