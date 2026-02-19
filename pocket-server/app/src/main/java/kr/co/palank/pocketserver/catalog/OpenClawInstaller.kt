@@ -1,6 +1,8 @@
 package kr.co.palank.pocketserver.catalog
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Environment
 import android.os.StatFs
 import android.util.Log
@@ -145,19 +147,29 @@ os.networkInterfaces = function() {
         val model = inputs["model"] ?: "gemini-2.5-flash-lite"
         val apiKey = inputs["api_key"] ?: throw IllegalArgumentException("API Key required")
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
+        val isOAuth = inputs["is_oauth"] == "true"
+
+        // ChatGPT OAuth 프로바이더는 별도 플로우
+        if (isOAuth && provider == "chatgpt") {
+            configureWithOAuth(model, telegramToken)
+            return@withContext Unit
+        }
 
         val envVarName = when (provider) {
             "groq" -> "GROQ_API_KEY"
+            "openai" -> "OPENAI_API_KEY"
             else -> "GEMINI_API_KEY"
         }
 
         val authChoice = when (provider) {
             "groq" -> "groq-api-key"
+            "openai" -> "openai-api-key"
             else -> "gemini-api-key"
         }
 
         val qualifiedModel = when (provider) {
             "groq" -> "groq/$model"
+            "openai" -> "openai/$model"
             else -> "google/$model"
         }
 
@@ -241,6 +253,262 @@ os.networkInterfaces = function() {
 
         Log.i(TAG, "OpenClaw configured via CLI")
         Unit
+    }
+
+    /**
+     * ChatGPT 구독 OAuth 인증을 통한 OpenClaw 설정.
+     *
+     * OpenClaw 자체 OAuth(`openclaw models auth login`)는 PRoot에서
+     * localhost:1455 콜백 서버가 동작하지 않아 실패함.
+     * 대신 Codex CLI의 `codex auth login`을 사용 (PicoClaw에서 검증됨)하여
+     * ~/.codex/auth.json 토큰을 OpenClaw의 auth-profiles.json에 주입.
+     *
+     * 1. Codex CLI 설치 확인 + codex auth login (검증된 OAuth)
+     * 2. ~/.codex/auth.json에서 토큰 읽기
+     * 3. auth-profiles.json 수동 생성
+     * 4. 모델을 openai-codex/[model] 로 설정
+     * 5. Telegram 채널 설정
+     */
+    private suspend fun configureWithOAuth(
+        model: String,
+        telegramToken: String,
+    ) {
+        val preamble = "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; "
+
+        // Step 1: Codex CLI 설치 확인 (PicoClaw가 먼저 설치했을 수 있음)
+        val codexCheck = prootManager.exec("/bin/bash", "-c", "codex --version 2>&1")
+        if (!codexCheck.isSuccess || !codexCheck.output.contains(".")) {
+            Log.i(TAG, "Installing Codex CLI for OAuth...")
+            val installResult = prootManager.exec(
+                "/bin/bash", "-c",
+                "npm install -g @openai/codex --no-color 2>&1"
+            )
+            if (!installResult.isSuccess) {
+                throw RuntimeException("Codex CLI 설치 실패: ${cleanOutput(installResult.output.takeLast(300))}")
+            }
+            Log.i(TAG, "Codex CLI installed")
+        }
+
+        // Step 2: 기존 인증 확인 — ~/.codex/auth.json이 이미 있는지
+        val authFile = File(rootfsPath, "root/.codex/auth.json")
+        if (!authFile.exists()) {
+            // Codex CLI OAuth 인증 — execWithStreaming으로 URL 감지 → 브라우저 열기
+            Log.i(TAG, "Starting Codex CLI OAuth login for OpenClaw...")
+            var browserOpened = false
+            val authResult = prootManager.execWithStreaming(
+                "/bin/bash", "-c",
+                "export BROWSER=/usr/local/bin/xdg-open; codex auth login 2>&1",
+                onLine = { line ->
+                    if (!browserOpened) {
+                        val url = extractOAuthUrl(line)
+                        if (url != null) {
+                            Log.i(TAG, "Codex OAuth URL detected: $url")
+                            openBrowserUrl(url)
+                            browserOpened = true
+                        }
+                    }
+                },
+                timeoutMs = 180_000,
+            )
+            Log.i(TAG, "Codex auth result (code=${authResult.exitCode})")
+
+            if (!authFile.exists()) {
+                throw RuntimeException(
+                    "ChatGPT 인증에 실패했습니다.\n" +
+                    "브라우저에서 ChatGPT 로그인을 완료해주세요.\n" +
+                    "ChatGPT Plus(\$20/월) 또는 Pro 구독이 필요합니다."
+                )
+            }
+        } else {
+            Log.i(TAG, "Existing Codex auth.json found, reusing for OpenClaw")
+        }
+
+        // Step 3: ~/.codex/auth.json에서 토큰 읽어 auth-profiles.json 생성
+        injectAuthProfiles(authFile)
+
+        // Step 4: openclaw.json 직접 생성
+        // `openclaw onboard --auth-choice openai-codex`는 non-interactive 모드에서
+        // "OAuth requires interactive mode." 에러 반환 → onboard 우회하고 직접 작성
+        val qualifiedModel = model // 이미 "openai-codex/gpt-5.3-codex" 형태
+        val profileKey = "openai-codex:default"
+        val config = JSONObject().apply {
+            put("gateway", JSONObject().apply {
+                put("mode", "local")
+            })
+            put("agents", JSONObject().apply {
+                put("defaults", JSONObject().apply {
+                    put("model", JSONObject().apply {
+                        put("primary", qualifiedModel)
+                        put("fallbacks", org.json.JSONArray())
+                    })
+                    put("compaction", JSONObject().apply {
+                        put("reserveTokensFloor", 4000)
+                    })
+                })
+            })
+            // auth 섹션: OpenClaw이 auth-profiles.json의 프로필을 인식하려면 필요
+            put("auth", JSONObject().apply {
+                put("profiles", JSONObject().apply {
+                    put(profileKey, JSONObject().apply {
+                        put("provider", "openai-codex")
+                        put("mode", "oauth")
+                    })
+                })
+                put("order", JSONObject().apply {
+                    put("openai-codex", org.json.JSONArray().apply {
+                        put(profileKey)
+                    })
+                })
+            })
+            put("channels", JSONObject().apply {
+                put("telegram", JSONObject().apply {
+                    put("enabled", true)
+                    put("botToken", telegramToken)
+                    put("dmPolicy", "open")
+                    put("allowFrom", org.json.JSONArray().apply { put("*") })
+                })
+            })
+        }
+
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        configFile.parentFile?.mkdirs()
+        configFile.writeText(config.toString(2))
+
+        // workspace 디렉토리 생성
+        File(rootfsPath, "root/.openclaw/workspace").mkdirs()
+
+        Log.i(TAG, "OpenClaw configured via ChatGPT OAuth (model=$qualifiedModel)")
+    }
+
+    /**
+     * ~/.codex/auth.json의 토큰을 OpenClaw의 auth-profiles.json에 주입.
+     *
+     * Codex CLI auth.json 구조 (ChatGPT OAuth 시):
+     * {
+     *   "auth_mode": "chatgpt",
+     *   "OPENAI_API_KEY": null,
+     *   "tokens": {
+     *     "id_token": "<JWT>",
+     *     "access_token": "<JWT>",
+     *     "refresh_token": "<opaque>",
+     *     "account_id": "acc-..."
+     *   },
+     *   "last_refresh": "2026-..."
+     * }
+     *
+     * 토큰은 top-level이 아닌 "tokens" 객체 안에 중첩되어 있음.
+     */
+    private fun injectAuthProfiles(codexAuthFile: File) {
+        try {
+            val codexAuth = JSONObject(codexAuthFile.readText())
+            val authMode = codexAuth.optString("auth_mode", "")
+            Log.i(TAG, "Codex auth.json auth_mode=$authMode")
+
+            // ChatGPT OAuth: 토큰은 "tokens" 중첩 객체 안에 있음
+            val tokens = codexAuth.optJSONObject("tokens")
+            if (tokens == null) {
+                Log.w(TAG, "No 'tokens' object in codex auth.json (auth_mode=$authMode)")
+                return
+            }
+
+            val accessToken = tokens.optString("access_token", "")
+            val refreshToken = tokens.optString("refresh_token", "")
+            val accountId = tokens.optString("account_id", "")
+
+            if (accessToken.isEmpty()) {
+                Log.w(TAG, "Empty access_token in codex auth.json tokens object")
+                return
+            }
+
+            // JWT에서 accountId 추출 (tokens.account_id가 없는 경우)
+            val resolvedAccountId = accountId.ifEmpty { extractAccountIdFromJwt(accessToken) }
+
+            // JWT에서 만료시간 추출
+            val expiresMs = extractExpiresFromJwt(accessToken)
+
+            // OpenClaw auth-profiles.json 정확한 형식:
+            // { "version": 1, "profiles": { "openai-codex:default": { "type": "oauth", ... } } }
+            val profileKey = "openai-codex:default"
+            val authProfiles = JSONObject().apply {
+                put("version", 1)
+                put("profiles", JSONObject().apply {
+                    put(profileKey, JSONObject().apply {
+                        put("type", "oauth")
+                        put("provider", "openai-codex")
+                        put("access", accessToken)
+                        put("refresh", refreshToken)
+                        put("expires", expiresMs)
+                        if (resolvedAccountId.isNotEmpty()) put("accountId", resolvedAccountId)
+                    })
+                })
+            }
+
+            // OpenClaw이 기대하는 경로: ~/.openclaw/agents/main/agent/auth-profiles.json
+            val agentDir = File(rootfsPath, "root/.openclaw/agents/main/agent")
+            agentDir.mkdirs()
+            val authProfilesFile = File(agentDir, "auth-profiles.json")
+            authProfilesFile.writeText(authProfiles.toString(2))
+
+            Log.i(TAG, "auth-profiles.json injected (version=1, type=oauth, accountId=${resolvedAccountId.take(10)}, expires=$expiresMs)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to inject auth-profiles.json from Codex auth", e)
+        }
+    }
+
+    /**
+     * JWT access_token에서 accountId 추출.
+     * JWT payload의 "https://api.openai.com/auth" → "chatgpt_account_id"
+     */
+    private fun extractAccountIdFromJwt(jwt: String): String {
+        return try {
+            val parts = jwt.split(".")
+            if (parts.size < 2) return ""
+            val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP))
+            val json = JSONObject(payload)
+            val authClaim = json.optJSONObject("https://api.openai.com/auth")
+            authClaim?.optString("chatgpt_account_id", "") ?: ""
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract accountId from JWT", e)
+            ""
+        }
+    }
+
+    /**
+     * JWT access_token에서 만료시간(ms) 추출.
+     * JWT payload의 "exp" claim (Unix seconds) → milliseconds.
+     */
+    private fun extractExpiresFromJwt(jwt: String): Long {
+        return try {
+            val parts = jwt.split(".")
+            if (parts.size < 2) return System.currentTimeMillis() + 3600_000
+            val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP))
+            val json = JSONObject(payload)
+            val exp = json.optLong("exp", 0)
+            if (exp > 0) exp * 1000 else System.currentTimeMillis() + 3600_000
+        } catch (e: Exception) {
+            System.currentTimeMillis() + 3600_000 // fallback: 1시간
+        }
+    }
+
+    private fun extractOAuthUrl(line: String): String? {
+        val match = Regex("(https://\\S+)").find(line) ?: return null
+        val url = match.groupValues[1].trimEnd(',', '.', ')', ']', '"', '\'')
+        // OAuth 관련 URL만 허용 (보안)
+        if (url.contains("auth.openai.com") || url.contains("login") || url.contains("authorize")) {
+            return url
+        }
+        return null
+    }
+
+    private fun openBrowserUrl(url: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open browser for OAuth URL", e)
+        }
     }
 
     private fun writeManualConfig(
@@ -462,21 +730,28 @@ os.networkInterfaces = function() {
             val provider = when {
                 model.startsWith("groq/") -> "groq"
                 model.startsWith("google/") -> "gemini"
+                model.startsWith("openai-codex/") -> "chatgpt"
+                model.startsWith("openai/") -> "openai"
                 else -> ""
             }
             val displayModel = model.removePrefix("groq/").removePrefix("google/")
+                .removePrefix("openai-codex/").removePrefix("openai/")
 
-            // api_key: .env 파일에서 읽기
-            val apiKey = try {
-                val envFile = File(rootfsPath, "root/.openclaw/.env")
-                if (envFile.exists()) {
-                    envFile.readLines()
-                        .firstOrNull { it.contains("API_KEY=") }
-                        ?.substringAfter("=")
-                        ?.trim()
-                        ?: ""
-                } else ""
-            } catch (_: Exception) { "" }
+            // api_key: chatgpt(OAuth)이면 "OAUTH", 아니면 .env에서 읽기
+            val apiKey = if (provider == "chatgpt") {
+                "OAUTH"
+            } else {
+                try {
+                    val envFile = File(rootfsPath, "root/.openclaw/.env")
+                    if (envFile.exists()) {
+                        envFile.readLines()
+                            .firstOrNull { it.contains("API_KEY=") }
+                            ?.substringAfter("=")
+                            ?.trim()
+                            ?: ""
+                    } else ""
+                } catch (_: Exception) { "" }
+            }
 
             // telegram_token: openclaw.json에서 읽기
             val telegramToken = json.optJSONObject("channels")

@@ -81,6 +81,7 @@ fun ServiceSetupScreen(
     val serviceId = viewModel.currentServiceId.collectAsState().value
     val isReconfiguring by viewModel.isReconfiguring.collectAsState()
     val reconfigureDefaults by viewModel.reconfigureDefaults.collectAsState()
+    val isOAuthFlow by viewModel.isOAuthFlow.collectAsState()
 
     // Watch service status to transition steps
     LaunchedEffect(services) {
@@ -129,6 +130,7 @@ fun ServiceSetupScreen(
             SetupStep.CONFIGURING -> ConfiguringStep(
                 serviceName = serviceDef?.name ?: "",
                 isReconfiguring = isReconfiguring,
+                isOAuth = isOAuthFlow,
             )
             SetupStep.COMPLETED -> CompletedStep(
                 serviceName = serviceDef?.name ?: "",
@@ -227,7 +229,8 @@ private fun InputStep(
     val extColors = PocketServerExtendedTheme.colors
     val serviceDef = viewModel.currentServiceDef ?: return
 
-    val providers = ServiceCatalog.providers
+    val serviceId = viewModel.currentServiceId.collectAsState().value ?: ""
+    val providers = ServiceCatalog.providersForService(serviceId)
 
     // Resolve initial provider/model from reconfigure defaults
     val initialProvider = if (isReconfiguring) {
@@ -431,7 +434,7 @@ private fun InputStep(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // --- Step 3: API Key Input (dynamic per provider) ---
+        // --- Step 3: API Key Input or OAuth Login (dynamic per provider) ---
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -456,7 +459,8 @@ private fun InputStep(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "${selectedProvider.displayName.substringBefore(" (")} API Key",
+                        text = if (selectedProvider.isOAuth) "계정 인증"
+                               else "${selectedProvider.displayName.substringBefore(" (")} API Key",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = colorScheme.onSurface,
@@ -465,31 +469,67 @@ private fun InputStep(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                OutlinedTextField(
-                    value = apiKeyValue,
-                    onValueChange = { apiKeyValue = it },
-                    placeholder = { Text("${selectedProvider.apiKeyPrefix}...", fontSize = 14.sp) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedButton(
-                    onClick = {
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(selectedProvider.apiKeyHelpUrl))
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                ) {
+                if (selectedProvider.isOAuth) {
+                    // OAuth 프로바이더: API 키 대신 로그인 안내
                     Text(
-                        text = selectedProvider.apiKeyHelpLabel,
+                        text = "설정 완료 버튼을 누르면 브라우저가 열립니다.\n" +
+                               "ChatGPT 계정으로 로그인하면 인증이 자동 완료됩니다.",
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
+                        color = extColors.textSecondary,
+                        lineHeight = 20.sp,
                     )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        ),
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "ChatGPT Plus ($20/월) 또는 Pro ($200/월) 구독 필요",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = colorScheme.primary,
+                            )
+                            Text(
+                                text = "구독 요금만으로 사용, 추가 API 비용 없음",
+                                fontSize = 12.sp,
+                                color = extColors.textSecondary,
+                            )
+                        }
+                    }
+                } else {
+                    // API 키 프로바이더: 기존 입력 필드
+                    OutlinedTextField(
+                        value = apiKeyValue,
+                        onValueChange = { apiKeyValue = it },
+                        placeholder = { Text("${selectedProvider.apiKeyPrefix}...", fontSize = 14.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(selectedProvider.apiKeyHelpUrl))
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(
+                            text = selectedProvider.apiKeyHelpLabel,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }
@@ -569,7 +609,8 @@ private fun InputStep(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        val apiKeyValid = apiKeyValue.matches(Regex(selectedProvider.apiKeyRegex))
+        val apiKeyValid = if (selectedProvider.isOAuth) true
+                          else apiKeyValue.matches(Regex(selectedProvider.apiKeyRegex))
         val inputFieldsValid = serviceDef.inputs.all { input ->
             val value = inputValues[input.id] ?: ""
             if (input.validationRegex != null) {
@@ -585,7 +626,8 @@ private fun InputStep(
                 val merged = inputValues.toMutableMap()
                 merged["provider"] = selectedProvider.id
                 merged["model"] = selectedModel.id
-                merged["api_key"] = apiKeyValue
+                merged["api_key"] = if (selectedProvider.isOAuth) "OAUTH" else apiKeyValue
+                merged["is_oauth"] = selectedProvider.isOAuth.toString()
                 if (isReconfiguring) {
                     viewModel.submitReconfigure(merged)
                 } else {
@@ -618,6 +660,7 @@ private fun InputStep(
 private fun ConfiguringStep(
     serviceName: String,
     isReconfiguring: Boolean = false,
+    isOAuth: Boolean = false,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val extColors = PocketServerExtendedTheme.colors
@@ -650,11 +693,28 @@ private fun ConfiguringStep(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = if (isReconfiguring) "설정을 변경하고 서비스를 재시작합니다" else "API 키를 설정하고 서비스를 시작합니다",
-            fontSize = 15.sp,
-            color = extColors.textSecondary,
-        )
+        if (isOAuth) {
+            Text(
+                text = "브라우저가 열리면 ChatGPT 계정으로\n로그인을 완료해주세요",
+                fontSize = 15.sp,
+                color = colorScheme.primary,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 22.sp,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "로그인 완료 후 자동으로 진행됩니다",
+                fontSize = 13.sp,
+                color = extColors.textSecondary,
+            )
+        } else {
+            Text(
+                text = if (isReconfiguring) "설정을 변경하고 서비스를 재시작합니다" else "API 키를 설정하고 서비스를 시작합니다",
+                fontSize = 15.sp,
+                color = extColors.textSecondary,
+            )
+        }
     }
 }
 

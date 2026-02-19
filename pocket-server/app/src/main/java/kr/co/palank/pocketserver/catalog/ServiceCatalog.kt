@@ -27,6 +27,10 @@ data class ProviderDef(
     val apiKeyHelpUrl: String,
     val apiKeyHelpLabel: String,
     val models: List<ModelDef>,
+    /** true = OAuth 브라우저 로그인 (API 키 불필요), false = API 키 입력 */
+    val isOAuth: Boolean = false,
+    /** OAuth 프로바이더가 지원하는 서비스 ID 목록 (빈 목록 = 전체 서비스 지원) */
+    val supportedServiceIds: List<String> = emptyList(),
 )
 
 data class ServiceDefinition(
@@ -78,7 +82,42 @@ object ServiceCatalog {
                 ModelDef("llama-4-scout-17b-16e-instruct", "Llama 4 Scout 17B"),
             ),
         ),
+        ProviderDef(
+            id = "chatgpt",
+            displayName = "ChatGPT 구독 (추가비용 없음)",
+            apiKeyPrefix = "",
+            apiKeyRegex = ".*",
+            apiKeyHelpUrl = "https://chatgpt.com",
+            apiKeyHelpLabel = "ChatGPT로 로그인",
+            isOAuth = true,
+            supportedServiceIds = emptyList(), // 양쪽 모두 지원 (PicoClaw: codex-cli, OpenClaw: openai-codex)
+            models = listOf(
+                ModelDef("openai-codex/gpt-5.3-codex", "GPT-5.3 Codex (최신)"),
+                ModelDef("openai-codex/gpt-5.2-codex", "GPT-5.2 Codex"),
+                ModelDef("openai-codex/gpt-5-codex-mini", "GPT-5 Codex Mini (경량)"),
+            ),
+        ),
+        ProviderDef(
+            id = "openai",
+            displayName = "OpenAI API (유료, ~$1/월)",
+            apiKeyPrefix = "sk-",
+            apiKeyRegex = "^sk-.{20,}$",
+            apiKeyHelpUrl = "https://platform.openai.com/api-keys",
+            apiKeyHelpLabel = "OpenAI API 키 받기",
+            models = listOf(
+                ModelDef("gpt-4.1-nano", "GPT-4.1 Nano (최저가)"),
+                ModelDef("gpt-4.1-mini", "GPT-4.1 Mini (밸런스)"),
+                ModelDef("gpt-4.1", "GPT-4.1 (최고품질)"),
+            ),
+        ),
     )
+
+    /** 주어진 서비스에 사용 가능한 프로바이더 목록 */
+    fun providersForService(serviceId: String): List<ProviderDef> {
+        return providers.filter { provider ->
+            provider.supportedServiceIds.isEmpty() || serviceId in provider.supportedServiceIds
+        }
+    }
 
     val services: List<ServiceDefinition> = listOf(
         ServiceDefinition(

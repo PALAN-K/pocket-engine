@@ -1,6 +1,8 @@
 package kr.co.palank.pocketserver.catalog
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -59,12 +61,26 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         val model = inputs["model"] ?: "gemini-2.5-flash-lite"
         val apiKey = inputs["api_key"] ?: throw IllegalArgumentException("API Key required")
         val telegramToken = inputs["telegram_token"] ?: throw IllegalArgumentException("Telegram Bot Token required")
+        val isOAuth = inputs["is_oauth"] == "true"
 
-        // Groq: provider prefix 필수 (normalizeModel()이 "groq/" 제거)
-        // Gemini: prefix 없이 사용 (PicoClaw의 normalizeModel()이 "gemini/" 미지원, "google/"만 지원)
+        // ChatGPT OAuth → Codex CLI 서브프로세스 프로바이더
+        if (isOAuth && provider == "chatgpt") {
+            configureWithCodexCli(telegramToken)
+            return@withContext Unit
+        }
+
+        // Provider별 모델 prefix 처리
         val qualifiedModel = when (provider) {
             "groq" -> "groq/$model"
+            "openai" -> "openai/$model"
             else -> model
+        }
+
+        // Provider별 api_base 설정
+        val apiBase = when (provider) {
+            "gemini" -> "https://generativelanguage.googleapis.com/v1beta/openai"
+            "openai" -> "https://api.openai.com/v1"
+            else -> ""
         }
 
         val config = JSONObject().apply {
@@ -81,9 +97,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             put("providers", JSONObject().apply {
                 put(provider, JSONObject().apply {
                     put("api_key", apiKey)
-                    // Gemini: 기본 v1beta가 /chat/completions 미지원 → v1beta/openai 필수
-                    put("api_base", if (provider == "gemini")
-                        "https://generativelanguage.googleapis.com/v1beta/openai" else "")
+                    put("api_base", apiBase)
                 })
             })
             put("channels", JSONObject().apply {
@@ -115,6 +129,152 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
 
         Log.i(TAG, "PicoClaw configured")
         Unit
+    }
+
+    /**
+     * ChatGPT 구독 인증을 통한 PicoClaw 설정.
+     * Codex CLI를 설치하고 OAuth 인증 후 codex-cli 프로바이더로 설정.
+     *
+     * 1. Node.js 설치 확인/설치 (Codex CLI는 Node.js 패키지)
+     * 2. Codex CLI 설치 (npm install -g @openai/codex)
+     * 3. codex auth login — stdout 스트리밍으로 OAuth URL 감지 → 브라우저 열기
+     * 4. PicoClaw config에 codex-cli 프로바이더 설정
+     */
+    private suspend fun configureWithCodexCli(telegramToken: String) {
+        // Step 1: Node.js 설치 확인
+        val nodeCheck = prootManager.exec("/bin/bash", "-c", "node --version 2>&1")
+        val hasNode = nodeCheck.output.contains("v2") // v20, v22 등
+        if (!hasNode) {
+            Log.i(TAG, "Node.js not found, installing for Codex CLI...")
+            val dlResult = prootManager.exec(
+                "/bin/bash", "-c",
+                "curl -fsSL --retry 3 --connect-timeout 30 -o /tmp/node.tar.gz " +
+                "'https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-arm64.tar.gz'"
+            )
+            if (!dlResult.isSuccess) {
+                throw RuntimeException("Node.js 다운로드 실패. 네트워크를 확인해주세요.")
+            }
+            val extractResult = prootManager.exec(
+                "/bin/bash", "-c",
+                "tar -xzf /tmp/node.tar.gz -C /usr/local/ --strip-components=1 && rm -f /tmp/node.tar.gz"
+            )
+            if (!extractResult.isSuccess) {
+                throw RuntimeException("Node.js 설치 실패: ${extractResult.output.takeLast(200)}")
+            }
+            Log.i(TAG, "Node.js installed for Codex CLI")
+        }
+
+        // Step 2: Codex CLI 설치
+        val codexCheck = prootManager.exec("/bin/bash", "-c", "codex --version 2>&1")
+        if (!codexCheck.isSuccess || !codexCheck.output.contains(".")) {
+            Log.i(TAG, "Installing Codex CLI...")
+            val installResult = prootManager.exec(
+                "/bin/bash", "-c",
+                "npm install -g @openai/codex --no-color 2>&1"
+            )
+            if (!installResult.isSuccess) {
+                throw RuntimeException("Codex CLI 설치 실패: ${installResult.output.takeLast(300)}")
+            }
+            Log.i(TAG, "Codex CLI installed")
+        }
+
+        // Step 3: 기존 인증 확인 — ~/.codex/auth.json이 있으면 재사용
+        val authFile = File(rootfsPath, "root/.codex/auth.json")
+        if (!authFile.exists()) {
+            // 인증 파일 없음 → Codex CLI OAuth 인증 실행
+            Log.i(TAG, "Starting Codex CLI OAuth login (streaming)...")
+            var browserOpened = false
+            val authResult = prootManager.execWithStreaming(
+                "/bin/bash", "-c",
+                "export BROWSER=/usr/local/bin/xdg-open; codex auth login 2>&1",
+                onLine = { line ->
+                    if (!browserOpened) {
+                        val url = extractOAuthUrl(line)
+                        if (url != null) {
+                            Log.i(TAG, "Codex OAuth URL detected: $url")
+                            openBrowserUrl(url)
+                            browserOpened = true
+                        }
+                    }
+                },
+                timeoutMs = 180_000,
+            )
+            Log.i(TAG, "Codex auth result (code=${authResult.exitCode})")
+
+            if (!authFile.exists()) {
+                Log.w(TAG, "Codex auth.json not found after auth flow")
+                throw RuntimeException(
+                    "ChatGPT 인증에 실패했습니다.\n" +
+                    "브라우저에서 ChatGPT 로그인을 완료해주세요.\n" +
+                    "ChatGPT Plus(\$20/월) 또는 Pro 구독이 필요합니다."
+                )
+            }
+            Log.i(TAG, "Codex auth.json created, auth successful")
+        } else {
+            Log.i(TAG, "Existing Codex auth.json found, reusing (skip browser login)")
+        }
+
+        // Step 5: PicoClaw config 작성 (codex-cli 프로바이더)
+        val config = JSONObject().apply {
+            put("agents", JSONObject().apply {
+                put("defaults", JSONObject().apply {
+                    put("workspace", "~/.picoclaw/workspace")
+                    put("restrict_to_workspace", true)
+                    put("provider", "codex-cli")
+                    put("model", "codex-cli")
+                    put("max_tokens", 8192)
+                    put("temperature", 0.7)
+                    put("max_tool_iterations", 20)
+                })
+            })
+            put("providers", JSONObject())
+            put("channels", JSONObject().apply {
+                put("telegram", JSONObject().apply {
+                    put("enabled", true)
+                    put("token", telegramToken)
+                    put("proxy", "")
+                    put("allow_from", org.json.JSONArray())
+                })
+            })
+            put("tools", JSONObject())
+            put("heartbeat", JSONObject().apply {
+                put("enabled", true)
+                put("interval", 30)
+            })
+            put("gateway", JSONObject().apply {
+                put("host", "0.0.0.0")
+                put("port", 18790)
+            })
+        }
+
+        val configFile = File(rootfsPath, "root/.picoclaw/config.json")
+        configFile.parentFile?.mkdirs()
+        configFile.writeText(config.toString(2))
+
+        val workspaceDir = File(rootfsPath, "root/.picoclaw/workspace")
+        workspaceDir.mkdirs()
+
+        Log.i(TAG, "PicoClaw configured with codex-cli provider")
+    }
+
+    private fun extractOAuthUrl(line: String): String? {
+        val match = Regex("(https://\\S+)").find(line) ?: return null
+        val url = match.groupValues[1].trimEnd(',', '.', ')', ']', '"', '\'')
+        if (url.contains("auth.openai.com") || url.contains("login") || url.contains("authorize")) {
+            return url
+        }
+        return null
+    }
+
+    private fun openBrowserUrl(url: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open browser for OAuth URL", e)
+        }
     }
 
     /**
@@ -211,13 +371,25 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         if (!configFile.exists()) return null
         return try {
             val json = JSONObject(configFile.readText())
-            val rawModel = json.optJSONObject("agents")?.optJSONObject("defaults")?.optString("model", "") ?: ""
+            val defaults = json.optJSONObject("agents")?.optJSONObject("defaults")
+            val rawModel = defaults?.optString("model", "") ?: ""
+            val rawProvider = defaults?.optString("provider", "") ?: ""
+
+            // codex-cli 프로바이더 감지
+            if (rawProvider == "codex-cli" || rawModel == "codex-cli") {
+                val telegramToken = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("token", "") ?: ""
+                return mapOf(
+                    "provider" to "chatgpt",
+                    "model" to "codex-cli",
+                    "api_key" to "OAUTH",
+                    "telegram_token" to telegramToken,
+                )
+            }
+
             val providers = json.optJSONObject("providers")
             val provider = providers?.keys()?.asSequence()?.firstOrNull() ?: ""
-            // Strip provider prefix (e.g., "groq/llama-3.3-70b-versatile" → "llama-3.3-70b-versatile")
-            val displayModel = rawModel.removePrefix("groq/").removePrefix("gemini/")
+            val displayModel = rawModel.removePrefix("groq/").removePrefix("gemini/").removePrefix("openai/")
 
-            // api_key와 telegram_token도 반환하여 재설정 시 기존 값 프리필
             val apiKey = providers?.optJSONObject(provider)?.optString("api_key", "") ?: ""
             val telegramToken = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("token", "") ?: ""
 

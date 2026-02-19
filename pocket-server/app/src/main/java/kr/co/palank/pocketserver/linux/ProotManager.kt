@@ -10,6 +10,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.util.Date
+import java.util.concurrent.TimeUnit
 
 sealed class ProotState {
     object Idle : ProotState()
@@ -209,10 +210,12 @@ class ProotManager(private val context: Context) {
      */
     internal fun buildInnerEnvironment(): Map<String, String> {
         ensureNetFixScript()
+        ensureBrowserBridgeScript()
         return mapOf(
             "HOME" to "/root",
             "TERM" to "xterm-256color",
             "LANG" to "en_US.UTF-8",
+            "BROWSER" to "/usr/local/bin/xdg-open",
             "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         )
     }
@@ -275,6 +278,39 @@ os.networkInterfaces = function() {
         // 2d. /root/.bashrc (root user's shell)
         val bashrcRoot = File(rootfsPath, "root/.bashrc")
         ensureLineInFile(bashrcRoot, "NODE_OPTIONS=", "export NODE_OPTIONS=\"$nodeOptions\"")
+    }
+
+    /**
+     * PRoot → Android 브라우저 브리지 스크립트.
+     *
+     * OAuth 로그인 등 브라우저가 필요한 CLI 도구(Codex CLI, OpenClaw openai-codex 등)가
+     * xdg-open 또는 $BROWSER를 호출하면, URL을 /support/open_url 파일에 기록.
+     * Engine 앱의 BrowserBridge(FileObserver)가 이를 감지하여 Android 브라우저를 실행.
+     *
+     * localhost 콜백은 PRoot이 Android와 네트워크 네임스페이스를 공유하므로 직접 동작.
+     */
+    internal fun ensureBrowserBridgeScript() {
+        val xdgOpen = File(rootfsPath, "usr/local/bin/xdg-open")
+        xdgOpen.parentFile?.mkdirs()
+        xdgOpen.writeText("""
+#!/bin/bash
+# PocketServer Browser Bridge — PRoot에서 Android 브라우저 열기
+# BrowserBridge(FileObserver)가 /support/open_url 감지 → Intent(ACTION_VIEW) 실행
+URL="${'$'}1"
+if [ -z "${'$'}URL" ]; then
+  echo "Usage: xdg-open <URL>" >&2
+  exit 1
+fi
+echo "${'$'}URL" > /support/open_url
+# 브라우저가 열릴 시간을 확보
+sleep 2
+exit 0
+""".trimIndent() + "\n")
+        xdgOpen.setExecutable(true, false)
+
+        // $BROWSER 환경변수도 .bashrc에 설정 (interactive shell 대응)
+        val bashrcRoot = File(rootfsPath, "root/.bashrc")
+        ensureLineInFile(bashrcRoot, "export BROWSER=", "export BROWSER=/usr/local/bin/xdg-open")
     }
 
     /**
@@ -437,6 +473,57 @@ os.networkInterfaces = function() {
 
         Log.d(TAG, "exec result (code=$exitCode): ${output.take(500)}")
         ExecResult(exitCode, output)
+    }
+
+    /**
+     * Execute a command inside PRoot with line-by-line stdout streaming.
+     *
+     * 일반 exec()와 달리 stdout을 한 줄씩 읽으면서 [onLine] 콜백을 호출.
+     * OAuth 인증 등 프로세스가 URL을 출력하면 실시간으로 감지할 수 있음.
+     *
+     * @param onLine 각 stdout 줄마다 호출되는 콜백
+     * @param timeoutMs 최대 대기 시간 (밀리초, 기본 3분)
+     */
+    suspend fun execWithStreaming(
+        vararg command: String,
+        onLine: ((String) -> Unit)? = null,
+        timeoutMs: Long = 180_000,
+    ): ExecResult = withContext(Dispatchers.IO) {
+        ProotBinaryManager.ensureReady(context)
+        ensureRootfsDirectories()
+
+        val cmd = buildEnvWrappedCommand(*command)
+
+        Log.d(TAG, "execWithStreaming: ${command.joinToString(" ")}")
+
+        val pb = ProcessBuilder(cmd)
+        pb.redirectErrorStream(true)
+
+        val proc = pb.start()
+        val output = StringBuilder()
+
+        val readerThread = Thread {
+            try {
+                proc.inputStream.bufferedReader().forEachLine { line ->
+                    output.appendLine(line)
+                    Log.d(TAG, "[stream] $line")
+                    try { onLine?.invoke(line) } catch (e: Exception) {
+                        Log.w(TAG, "onLine callback error", e)
+                    }
+                }
+            } catch (_: Exception) {}
+        }.apply { isDaemon = true; name = "proot-stream"; start() }
+
+        val completed = proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+        if (!completed) {
+            Log.w(TAG, "execWithStreaming timed out after ${timeoutMs}ms, killing process")
+            proc.destroyForcibly()
+        }
+        readerThread.join(5000)
+
+        val exitCode = if (completed) proc.exitValue() else -1
+        Log.d(TAG, "execWithStreaming result (code=$exitCode): ${output.toString().take(500)}")
+        ExecResult(exitCode, output.toString())
     }
 
     fun stop() {

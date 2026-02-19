@@ -206,8 +206,8 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
 
 | 서비스 | 타입 | 크기 | RAM | 설치 시간 | 인증 | 우선순위 |
 |--------|------|------|-----|-----------|------|----------|
-| PicoClaw | Go single binary | ~15MB | <10MB | 10초 | Gemini API Key | **1순위** |
-| OpenClaw | Node.js 앱 | ~500MB | 2GB+ | 5-15분 | Gemini API Key | 2순위 |
+| PicoClaw | Go single binary | ~15MB | <10MB | 10초 | Gemini API Key / ChatGPT 구독 | **1순위** |
+| OpenClaw | Node.js 앱 | ~500MB | 2GB+ | 5-15분 | Gemini API Key / ChatGPT 구독 | 2순위 |
 
 ### PicoClaw 상세
 - 출처: https://picoclaw.ai/docs, https://github.com/sipeed/picoclaw
@@ -221,6 +221,12 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
 - model 형식: `provider/model` (예: `groq/llama-3.3-70b-versatile`, `gemini/gemini-2.5-flash`)
 - 필수 기본값: max_tokens=8192, temperature=0.7, max_tool_iterations=20
 - Groq tool_use_failed: Groq API 상류 간헐적 버그, 우리 코드로 수정 불가 (출처: https://community.groq.com/t/tool-use-failed-on-llama4-models/427)
+- **codex-cli 서브프로세스 프로바이더** (v0.1.2+, PR #80): ChatGPT 구독 인증으로 사용 가능 [실험]
+  - Config: `"provider": "codex-cli"`, `"model": "codex-cli"` (agents.defaults에 설정)
+  - 동작: PicoClaw가 내부적으로 `codex exec --json` 서브프로세스 실행
+  - 인증: `~/.codex/auth.json` 파일 필요 (Codex CLI OAuth 인증 후 생성됨)
+  - 의존성: Node.js + Codex CLI (`npm install -g @openai/codex`) 설치 필요
+  - providers 섹션은 빈 객체 `{}` (codex-cli는 자체 인증 사용)
 
 ### OpenClaw on PRoot
 - 출처: https://docs.openclaw.ai
@@ -237,6 +243,12 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
   - `--accept-risk`: non-interactive 모드 필수 플래그 (2026.02 추가됨)
 - 성공 판단: exit code 대신 config 파일 존재+크기 확인 (onboard가 config 작성 후 daemon 단계에서 exit 1 반환할 수 있음)
 - `reserveTokensFloor: 4000` 필수 (Groq Llama 모델의 context overflow 방지)
+- **openai-codex OAuth 프로바이더**: ChatGPT 구독 인증으로 사용 가능 [실험]
+  - 명령: `openclaw models auth login --provider openai-codex`
+  - **주의**: headless 환경(PRoot)에서는 xdg-open 대신 stdout에 OAuth URL 출력
+  - 반드시 `execWithStreaming()`으로 실행하여 실시간 URL 감지 필요
+  - 일반 `exec()`의 `readText()`는 프로세스 종료까지 블로킹 → URL이 삼켜짐
+  - 인증 성공 후 `openclaw.json`에 openai-codex 프로바이더가 추가됨
 
 ### Gemini API Key
 - 출처: https://ai.google.dev/gemini-api/docs/api-key
@@ -262,7 +274,73 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
 - **사용 금지**: Google ToS 위반 위험, 계정 밴 보고, 주기적 API 버전 차단
 - 대안: Gemini API Key 직접 발급 (안정적, 만료 없음)
 
-### Auth Flow (복사-붙여넣기 방식)
+### ChatGPT 구독 인증 (OAuth) — PicoClaw & OpenClaw 공통 [실험]
+
+ChatGPT Plus/Pro 구독자($20+/월)가 추가 API 비용 없이 OpenAI 모델 사용 가능.
+ServiceCatalog의 `chatgpt` 프로바이더 (`isOAuth = true`, `supportedServiceIds = emptyList()` = 양쪽 지원).
+
+#### 서비스별 OAuth 메커니즘
+
+| | PicoClaw | OpenClaw |
+|---|---------|----------|
+| 프로바이더명 | `codex-cli` (서브프로세스) | `openai-codex` (OAuth) |
+| 인증 명령 | `codex auth login` | `openclaw models auth login --provider openai-codex` |
+| 인증 파일 | `~/.codex/auth.json` | `~/.openclaw/openclaw.json` 내 프로바이더 |
+| 의존성 | Node.js + Codex CLI | 없음 (OpenClaw 자체 지원) |
+| Config model 값 | `"codex-cli"` | `"openai-codex/gpt-5.3-codex"` 등 |
+
+#### ProotManager.execWithStreaming() 패턴 [실험]
+
+OAuth 인증 명령이 stdout에 URL을 출력하므로, 실시간으로 읽어 Android 브라우저를 열어야 함.
+일반 `exec()`는 `readText()`가 프로세스 종료까지 블로킹하여 URL이 삼켜짐.
+
+```kotlin
+// ProotManager.kt에 추가된 메서드
+suspend fun execWithStreaming(
+    vararg command: String,
+    onLine: ((String) -> Unit)? = null,
+    timeoutMs: Long = 180_000,
+): ExecResult
+```
+
+- daemon 스레드로 stdout을 line-by-line 읽기
+- `onLine` 콜백에서 OAuth URL 패턴 감지 → `context.startActivity(Intent.ACTION_VIEW)`
+- `Process.waitFor(timeout, TimeUnit.MILLISECONDS)`로 타임아웃 지원
+- OAuth 인증은 최대 3분(180초) 타임아웃 설정
+
+#### OAuth URL 감지 패턴
+
+```kotlin
+private fun extractOAuthUrl(line: String): String? {
+    val match = Regex("(https://\\S+)").find(line) ?: return null
+    val url = match.groupValues[1].trimEnd(',', '.', ')', ']', '"', '\'')
+    if (url.contains("auth.openai.com") || url.contains("login") || url.contains("authorize")) {
+        return url
+    }
+    return null
+}
+```
+
+#### PicoClaw ChatGPT 인증 흐름
+```
+1. Node.js 설치 확인 (codex CLI 의존성)
+2. Codex CLI 설치 (`npm install -g @openai/codex`)
+3. `codex auth login` — execWithStreaming으로 실행
+4. stdout에서 OAuth URL 감지 → Android 브라우저 열기
+5. 사용자가 ChatGPT 로그인 완료 → ~/.codex/auth.json 생성
+6. PicoClaw config: provider="codex-cli", model="codex-cli"
+```
+
+#### OpenClaw ChatGPT 인증 흐름
+```
+1. `openclaw models auth login --provider openai-codex` — execWithStreaming으로 실행
+2. stdout에서 OAuth URL 감지 → Android 브라우저 열기
+3. 사용자가 ChatGPT 로그인 완료
+4. OpenClaw config에 openai-codex 프로바이더 자동 추가
+5. `openclaw config set model openai-codex/<model>` 로 모델 설정
+```
+
+### Auth Flow (복사-붙여넣기 방식) — API Key 인증
 ```
 1. "API 키 받기" 탭 → Intent(ACTION_VIEW, "https://aistudio.google.com/app/apikey")
 2. 사용자가 Google AI Studio에서 키 생성/복사
@@ -288,13 +366,15 @@ Engine 앱 내에서 AI 에이전트(PicoClaw, OpenClaw)를 원클릭 설치하�
 ### Engine 신규 파일 (Phase 5)
 ```
 catalog/
-├── ServiceCatalog.kt        서비스 정의 + InputField 스키마
-├── PicoClawInstaller.kt     PicoClaw 설치/시작/중지
-└── OpenClawInstaller.kt     OpenClaw 설치/시작/중지
+├── ServiceCatalog.kt        서비스 정의 + InputField/ProviderDef 스키마
+├── PicoClawInstaller.kt     PicoClaw 설치/시작/중지 + codex-cli OAuth
+└── OpenClawInstaller.kt     OpenClaw 설치/시작/중지 + openai-codex OAuth
 ui/servicestore/
 ├── ServiceStoreScreen.kt    서비스 목록
-├── ServiceSetupScreen.kt    API키/봇토큰 입력 위저드
-└── ServiceStoreViewModel.kt 상태 관리
+├── ServiceSetupScreen.kt    API키/봇토큰 입력 위저드 + OAuth UI
+└── ServiceStoreViewModel.kt 상태 관리 + isOAuthFlow 추적
+bridge/
+└── BrowserBridge.kt         FileObserver 기반 PRoot→Android 브라우저 열기 (보조)
 service/
 └── ServiceManager.kt        서비스 프로세스 관리
 ```
@@ -330,6 +410,9 @@ service/
 15. **Antigravity OAuth 사용 금지**: Google ToS 위반 위험. Gemini API Key 직접 발급 방식만 사용.
 16. **PicoClaw allow_from은 반드시 빈 배열 `[]`**: `["*"]`는 와일드카드로 동작하지 않음. exact match만 수행하므로 빈 배열이 "전체 허용"의 유일한 방법.
 17. **Groq tool_use_failed는 상류 API 버그**: config 수정으로 해결 불가. Llama 모델의 간헐적 tool call 실패이며 Groq 측에서 수정해야 함.
+18. **OAuth 인증 명령은 반드시 `execWithStreaming()` 사용**: `exec()`의 `readText()`는 프로세스 종료까지 블로킹하여 OAuth URL이 삼켜짐. `codex auth login`과 `openclaw models auth login` 모두 해당.
+19. **Kotlin 블록 주석 내 `/*` 금지**: Kotlin은 중첩 블록 주석을 지원하므로 KDoc `/** */` 내에 `/*`가 있으면 컴파일 오류 발생. 예: `openai-codex/*` → `openai-codex/[model]`로 이스케이프.
+20. **ChatGPT 구독 = ChatGPT Plus/Pro 필요**: OAuth 인증은 무료 ChatGPT 계정으로는 불가. 사용자에게 "$20/월 이상 구독 필요" 안내 필수.
 
 ## Signing Keystore (Shared Between Both Apps)
 

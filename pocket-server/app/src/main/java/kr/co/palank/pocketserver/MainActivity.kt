@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -86,7 +87,7 @@ class MainActivity : ComponentActivity() {
                 val prefs = remember {
                     this@MainActivity.getSharedPreferences("pocketserver_prefs", Context.MODE_PRIVATE)
                 }
-                var currentScreen by remember { mutableStateOf("setup") }
+                var currentScreen by rememberSaveable { mutableStateOf("setup") }
                 var optimizationGuideDone by remember {
                     mutableStateOf(prefs.getBoolean("optimization_guide_done", false))
                 }

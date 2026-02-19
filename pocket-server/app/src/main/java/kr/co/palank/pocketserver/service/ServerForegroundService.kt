@@ -26,6 +26,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kr.co.palank.pocketserver.MainActivity
 import kr.co.palank.pocketserver.R
+import kr.co.palank.pocketserver.bridge.BrowserBridge
 import kr.co.palank.pocketserver.ipc.IpcServer
 import kr.co.palank.pocketserver.linux.ServerState
 import kr.co.palank.pocketserver.linux.SessionManager
@@ -37,6 +38,7 @@ class ServerForegroundService : Service() {
     private lateinit var wifiLock: WifiManager.WifiLock
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var ipcServer: IpcServer? = null
+    private var browserBridge: BrowserBridge? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -61,6 +63,7 @@ class ServerForegroundService : Service() {
                 val notification = createNotification("서버 시작 중...", "PocketServer를 준비하고 있습니다.")
                 startForegroundCompat(notification)
                 startIpcServer()
+                startBrowserBridge()
 
                 // Write WiFi IP file before PRoot starts so net-fix.js has it immediately
                 networkMonitor?.writeCurrentIpFile()
@@ -84,6 +87,7 @@ class ServerForegroundService : Service() {
                 val notification = createNotification("서버 실행 중", "PocketServer가 백그라운드에서 동작하고 있습니다.")
                 startForegroundCompat(notification)
                 startIpcServer()
+                startBrowserBridge()
 
                 // Write WiFi IP file before PRoot starts so net-fix.js has it immediately
                 networkMonitor?.writeCurrentIpFile()
@@ -140,6 +144,16 @@ class ServerForegroundService : Service() {
         ipcServer = IpcServer(this, manager, network, sm).also {
             it.start(serviceScope)
         }
+    }
+
+    private fun startBrowserBridge() {
+        if (browserBridge != null) return
+        browserBridge = BrowserBridge(this).also { it.start() }
+    }
+
+    private fun stopBrowserBridge() {
+        browserBridge?.stop()
+        browserBridge = null
     }
 
     @SuppressLint("WakelockTimeout")
@@ -249,6 +263,7 @@ class ServerForegroundService : Service() {
         super.onDestroy()
         ipcServer?.stop()
         ipcServer = null
+        stopBrowserBridge()
         sessionManager?.stop()
         wakeLock?.let {
             if (it.isHeld) it.release()

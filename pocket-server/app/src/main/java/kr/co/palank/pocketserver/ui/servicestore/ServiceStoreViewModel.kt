@@ -80,8 +80,12 @@ class ServiceStoreViewModel(application: Application) : AndroidViewModel(applica
         _setupStep.value = SetupStep.API_KEY_INPUT
     }
 
+    private val _isOAuthFlow = MutableStateFlow(false)
+    val isOAuthFlow: StateFlow<Boolean> = _isOAuthFlow
+
     fun submitInputs(inputs: Map<String, String>) {
         val serviceId = _currentServiceId.value ?: return
+        _isOAuthFlow.value = inputs["is_oauth"] == "true"
         _setupStep.value = SetupStep.CONFIGURING
         serviceManager.configureAndStart(serviceId, inputs)
     }
@@ -125,6 +129,7 @@ class ServiceStoreViewModel(application: Application) : AndroidViewModel(applica
 
     fun submitReconfigure(inputs: Map<String, String>) {
         val serviceId = _currentServiceId.value ?: return
+        _isOAuthFlow.value = inputs["is_oauth"] == "true"
         _setupStep.value = SetupStep.CONFIGURING
         serviceManager.reconfigureService(serviceId, inputs)
     }
