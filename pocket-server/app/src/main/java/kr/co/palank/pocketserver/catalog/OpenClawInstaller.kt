@@ -368,6 +368,9 @@ os.networkInterfaces = function() {
                     put("allowFrom", org.json.JSONArray().apply { put("*") })
                 })
             })
+            put("commands", JSONObject().apply {
+                put("restart", true)
+            })
         }
 
         val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
@@ -541,6 +544,9 @@ os.networkInterfaces = function() {
                     })
                 })
             })
+            put("commands", JSONObject().apply {
+                put("restart", true)
+            })
         }
 
         val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
@@ -637,12 +643,13 @@ os.networkInterfaces = function() {
             "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1"
         )
 
-        // config 존재 확인
-        val configExists = File(rootfsPath, "root/.openclaw/openclaw.json").exists()
-        if (!configExists) {
+        // config 존재 확인 + 마이그레이션
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        if (!configFile.exists()) {
             Log.w(TAG, "OpenClaw config not found, skipping start")
             return@withContext false
         }
+        patchCommandsRestart(configFile)
 
         // doctor --fix 제거: gateway가 자체적으로 auth token을 관리함.
         // doctor --fix가 config를 수정하면 gateway 시작 시 token mismatch 발생.
@@ -849,6 +856,20 @@ os.networkInterfaces = function() {
      * PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없으므로,
      * 앱 재시작 후 zombie gateway를 정리하려면 Android shell에서 실행해야 함.
      */
+    private fun patchCommandsRestart(configFile: File) {
+        try {
+            val json = JSONObject(configFile.readText())
+            val commands = json.optJSONObject("commands")
+            if (commands == null || !commands.optBoolean("restart", false)) {
+                json.put("commands", JSONObject().apply { put("restart", true) })
+                configFile.writeText(json.toString(2))
+                Log.i(TAG, "Patched commands.restart=true into existing config")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to patch commands.restart", e)
+        }
+    }
+
     private fun killAndroidProcesses(namePattern: String) {
         try {
             val proc = Runtime.getRuntime().exec(arrayOf("sh", "-c",
