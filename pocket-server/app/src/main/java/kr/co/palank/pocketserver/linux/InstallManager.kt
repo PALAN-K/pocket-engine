@@ -398,24 +398,36 @@ class InstallManager(private val context: Context) {
      * SSH 비밀번호를 항상 설정/재설정한다.
      * rootfs가 재추출되면 /etc/shadow가 초기화되므로 step 체크와 무관하게 매번 실행.
      */
-    private suspend fun ensureSshPassword() {
+    internal suspend fun ensureSshPassword() {
         val password = sshPassword ?: generatePassword()
         prefs.edit().putString(KEY_SSH_PASSWORD, password).apply()
         Log.i(TAG, "ensureSshPassword: setting password (length=${password.length})")
 
-        // chpasswd로 비밀번호 설정
-        var result = prootManager.exec("/bin/sh", "-c",
-            "echo 'root:$password' | chpasswd 2>&1"
-        )
-        Log.i(TAG, "chpasswd root: success=${result.isSuccess}, output=${result.output.take(200)}")
+        // chpasswd로 비밀번호 설정 (최대 3회 시도)
+        var result: ProotManager.ExecResult? = null
+        for (attempt in 1..3) {
+            result = prootManager.exec("/bin/sh", "-c",
+                "echo 'root:$password' | chpasswd 2>&1"
+            )
+            if (result.isSuccess) break
+            Log.w(TAG, "chpasswd root attempt $attempt/3 failed: ${result.output.take(200)}")
+            if (attempt < 3) kotlinx.coroutines.delay(500)
+        }
+        Log.i(TAG, "chpasswd root: success=${result?.isSuccess}, output=${result?.output?.take(200)}")
 
         prootManager.exec("/bin/sh", "-c",
             "id pocketserver >/dev/null 2>&1 || useradd -m -s /bin/bash pocketserver"
         )
-        result = prootManager.exec("/bin/sh", "-c",
-            "echo 'pocketserver:$password' | chpasswd 2>&1"
-        )
-        Log.i(TAG, "chpasswd pocketserver: success=${result.isSuccess}, output=${result.output.take(200)}")
+        result = null
+        for (attempt in 1..3) {
+            result = prootManager.exec("/bin/sh", "-c",
+                "echo 'pocketserver:$password' | chpasswd 2>&1"
+            )
+            if (result.isSuccess) break
+            Log.w(TAG, "chpasswd pocketserver attempt $attempt/3 failed: ${result.output.take(200)}")
+            if (attempt < 3) kotlinx.coroutines.delay(500)
+        }
+        Log.i(TAG, "chpasswd pocketserver: success=${result?.isSuccess}, output=${result?.output?.take(200)}")
 
         // /etc/shadow 해시를 /etc/passwd에 복사 (Dropbear가 /etc/passwd만 읽는 경우 대비)
         // sed 대신 awk 사용 — 해시에 포함된 $ 문자가 sed를 깨뜨리는 문제 방지

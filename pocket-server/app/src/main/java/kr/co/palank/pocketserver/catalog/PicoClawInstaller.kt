@@ -289,6 +289,8 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             if (proc.isAlive) proc.destroyForcibly()
         }
         picoClawProcess = null
+        // Android-side pkill: PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없음
+        killAndroidProcesses("picoclaw")
         prootManager.exec(
             "/bin/bash", "-c",
             "pkill -f 'picoclaw gateway' 2>/dev/null; sleep 1"
@@ -343,6 +345,8 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             if (proc.isAlive) proc.destroyForcibly()
         }
         picoClawProcess = null
+        // Android-side kill (cross-PRoot-session cleanup)
+        killAndroidProcesses("picoclaw")
         // Fallback: PRoot 내 잔여 프로세스 정리
         prootManager.exec(
             "/bin/bash", "-c",
@@ -402,6 +406,17 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read PicoClaw config", e)
             null
+        }
+    }
+
+    private fun killAndroidProcesses(namePattern: String) {
+        try {
+            val proc = Runtime.getRuntime().exec(arrayOf("sh", "-c",
+                "pkill -f '$namePattern' 2>/dev/null"))
+            proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+            Log.i(TAG, "Android-side pkill for '$namePattern' completed")
+        } catch (e: Exception) {
+            Log.w(TAG, "Android-side pkill failed for '$namePattern'", e)
         }
     }
 

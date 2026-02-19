@@ -76,6 +76,9 @@ class SessionManager(private val context: Context) {
         _state.value = ServerState.Starting
         scope.launch {
             try {
+                // SSH 비밀번호 재적용 (설치 시 chpasswd 실패 대비)
+                installManager.ensureSshPassword()
+
                 // Dropbear 시작 (PRoot 내에서 실행)
                 dropbearManager.start()
 

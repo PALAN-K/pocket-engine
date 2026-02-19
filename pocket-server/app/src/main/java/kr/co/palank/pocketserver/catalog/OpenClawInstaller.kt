@@ -629,6 +629,9 @@ os.networkInterfaces = function() {
             if (proc.isAlive) proc.destroyForcibly()
         }
         openclawProcess = null
+        // Android-side pkill: PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없음.
+        // Android shell에서 실행하면 같은 UID의 모든 프로세스를 죽일 수 있음.
+        killAndroidProcesses("openclaw")
         prootManager.exec(
             "/bin/bash", "-c",
             "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1"
@@ -680,9 +683,63 @@ os.networkInterfaces = function() {
                 break
             }
         }
-        Log.i(TAG, "OpenClaw start: alive=$alive")
+        if (!alive) return@withContext false
 
-        alive
+        // 로그 기반 헬스체크: gateway 초기화 에러 감지 후 1회 재시도
+        delay(5000)
+        if (hasGatewayError(logFile)) {
+            Log.w(TAG, "Gateway error detected in log, retrying once...")
+            openclawProcess?.let { proc ->
+                proc.destroy()
+                if (proc.isAlive) proc.destroyForcibly()
+            }
+            openclawProcess = null
+            killAndroidProcesses("openclaw")
+            prootManager.exec("/bin/bash", "-c", "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1")
+            delay(3000)
+
+            logFile.writeText("")
+            openclawProcess = pb.start()
+
+            var retryAlive = false
+            for (i in 1..15) {
+                delay(1000)
+                if (openclawProcess?.isAlive != true) {
+                    Log.e(TAG, "OpenClaw retry died after ${i}s")
+                    return@withContext false
+                }
+                if (i >= 3) {
+                    retryAlive = true
+                    break
+                }
+            }
+            if (!retryAlive) return@withContext false
+
+            delay(5000)
+            if (hasGatewayError(logFile)) {
+                Log.e(TAG, "OpenClaw retry also has gateway errors")
+                return@withContext false
+            }
+            Log.i(TAG, "OpenClaw start: retry succeeded")
+        } else {
+            Log.i(TAG, "OpenClaw start: alive=true, no gateway errors")
+        }
+
+        true
+    }
+
+    private fun hasGatewayError(logFile: File): Boolean {
+        val errorKeywords = listOf("ECONNREFUSED", "auth", "token", "unauthorized", "FATAL")
+        return try {
+            if (!logFile.exists()) false
+            else {
+                val tail = logFile.readLines().takeLast(20)
+                tail.any { line ->
+                    val lower = line.lowercase()
+                    errorKeywords.any { kw -> lower.contains(kw.lowercase()) }
+                }
+            }
+        } catch (_: Exception) { false }
     }
 
     override suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
@@ -691,6 +748,8 @@ os.networkInterfaces = function() {
             if (proc.isAlive) proc.destroyForcibly()
         }
         openclawProcess = null
+        // Android-side kill (cross-PRoot-session cleanup)
+        killAndroidProcesses("openclaw")
         // Fallback: PRoot 내 잔여 프로세스 정리
         prootManager.exec(
             "/bin/bash", "-c",
@@ -782,6 +841,22 @@ os.networkInterfaces = function() {
             stat.blockSizeLong * stat.availableBlocksLong / (1024 * 1024)
         } catch (e: Exception) {
             Long.MAX_VALUE // 확인 불가 시 통과
+        }
+    }
+
+    /**
+     * Android 측에서 프로세스 이름 패턴으로 프로세스를 죽임.
+     * PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없으므로,
+     * 앱 재시작 후 zombie gateway를 정리하려면 Android shell에서 실행해야 함.
+     */
+    private fun killAndroidProcesses(namePattern: String) {
+        try {
+            val proc = Runtime.getRuntime().exec(arrayOf("sh", "-c",
+                "pkill -f '$namePattern' 2>/dev/null"))
+            proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+            Log.i(TAG, "Android-side pkill for '$namePattern' completed")
+        } catch (e: Exception) {
+            Log.w(TAG, "Android-side pkill failed for '$namePattern'", e)
         }
     }
 

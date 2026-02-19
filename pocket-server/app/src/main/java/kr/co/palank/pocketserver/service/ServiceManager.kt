@@ -84,6 +84,7 @@ class ServiceManager(private val context: Context) {
         scope.launch(Dispatchers.IO) {
             try {
                 installer.configure(inputs)
+                delay(2000) // config/auth 파일 디스크 flush 대기
                 val started = installer.start()
                 if (started) {
                     updateServiceStatus(serviceId, ServiceStatus.RUNNING)
