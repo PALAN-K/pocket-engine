@@ -131,11 +131,19 @@ class InstallManager(private val context: Context) {
                 markStep(STEP_DROPBEAR_INSTALLED)
             }
 
-            // Step 6.5: libnetstub.so 설치 (89-92%)
+            // Step 6.5: cron 설치 (89%)
+            // PRoot에는 systemd가 없으므로 cron으로 예약 작업/watchdog 구현
+            if (!stepDone(STEP_CRON_INSTALLED)) {
+                _state.value = InstallState.Progress(89, "예약 작업 도구 설치 중...")
+                installCron()
+                markStep(STEP_CRON_INSTALLED)
+            }
+
+            // Step 6.6: libnetstub.so 설치 (90-92%)
             // getifaddrs() LD_PRELOAD shim — Android 11+ netlink EACCES 대응
             // Python, Go, Rust, Node.js 등 모든 언어에서 네트워크 인터페이스 조회 가능
             if (!stepDone(STEP_NETSTUB_INSTALLED)) {
-                _state.value = InstallState.Progress(89, "네트워크 호환성 라이브러리 설치 중...")
+                _state.value = InstallState.Progress(90, "네트워크 호환성 라이브러리 설치 중...")
                 installNetStub()
                 markStep(STEP_NETSTUB_INSTALLED)
             }
@@ -849,6 +857,37 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
      * Registered in /etc/ld.so.preload so it loads for ALL processes automatically.
      * Reference: George-Seven/Termux-Proot-Utils approach.
      */
+    /**
+     * cron 데몬 설치 — PRoot에는 systemd가 없으므로 cron이 유일한 예약 작업 메커니즘.
+     * /etc/profile.d/start-cron.sh를 통해 SSH 로그인 시 자동 시작.
+     * 실패해도 non-fatal (cron은 선택적 기능).
+     */
+    private suspend fun installCron() {
+        try {
+            val result = prootManager.exec(
+                "/bin/sh", "-c",
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cron 2>&1"
+            )
+            if (result.isSuccess) {
+                Log.i(TAG, "cron installed via apt-get")
+            } else {
+                Log.w(TAG, "cron installation failed (non-fatal): ${result.output.takeLast(200)}")
+            }
+
+            // cron 자동 시작 스크립트 (SSH 로그인 시 또는 profile 소싱 시)
+            val rootfsDir = File(context.filesDir, "ubuntu")
+            File(rootfsDir, "etc/profile.d/start-cron.sh").writeText(
+                "#!/bin/sh\n" +
+                "if command -v cron >/dev/null 2>&1; then\n" +
+                "  pgrep -x cron >/dev/null 2>&1 || cron 2>/dev/null\n" +
+                "fi\n"
+            )
+            Log.i(TAG, "cron auto-start script written to /etc/profile.d/start-cron.sh")
+        } catch (e: Exception) {
+            Log.w(TAG, "cron installation failed (non-fatal): ${e.message}")
+        }
+    }
+
     private suspend fun installNetStub() {
         val rootfsDir = File(context.filesDir, "ubuntu")
         val libDir = File(rootfsDir, "usr/local/lib")
@@ -970,6 +1009,7 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
             .remove(STEP_CONFIGURED)
             .remove(STEP_SWAP_DONE)
             .remove(STEP_DROPBEAR_INSTALLED)
+            .remove(STEP_CRON_INSTALLED)
             .remove(STEP_NETSTUB_INSTALLED)
             .apply()
         _state.value = InstallState.Idle
@@ -990,6 +1030,7 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
         private const val STEP_CONFIGURED = "step_configured"
         private const val STEP_SWAP_DONE = "step_swap_done"
         private const val STEP_DROPBEAR_INSTALLED = "step_dropbear_installed"
+        private const val STEP_CRON_INSTALLED = "step_cron_installed"
         private const val STEP_NETSTUB_INSTALLED = "step_netstub_installed"
         // 3 mirror URLs for rootfs — tries in order, each with retry
         private val ROOTFS_URLS = listOf(

@@ -105,9 +105,10 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
         onProgress(85, "호환성 패치 적용 중...")
         applyBionicBypass()
 
-        // Step 8: 설정 디렉토리 생성
+        // Step 8: 설정 디렉토리 생성 + 심링크 (identity 통합)
         onProgress(95, "설정 디렉토리 생성 중...")
         prootManager.exec("/bin/bash", "-c", "mkdir -p $configDir")
+        ensureOpenclawSymlink()
 
         onProgress(100, "OpenClaw 설치 완료")
         Log.i(TAG, "OpenClaw installed successfully")
@@ -258,6 +259,9 @@ os.networkInterfaces = function() {
             }
         }
 
+        // 심링크 보장 — SSH 로그인 시 HOME=/home/pocketserver에서도 동일 config 참조
+        ensureOpenclawSymlink()
+
         Log.i(TAG, "OpenClaw configured via CLI")
         Unit
     }
@@ -386,6 +390,9 @@ os.networkInterfaces = function() {
 
         // workspace 디렉토리 생성
         File(rootfsPath, "root/.openclaw/workspace").mkdirs()
+
+        // 심링크 보장
+        ensureOpenclawSymlink()
 
         Log.i(TAG, "OpenClaw configured via ChatGPT OAuth (model=$qualifiedModel)")
     }
@@ -650,6 +657,12 @@ os.networkInterfaces = function() {
             "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1"
         )
 
+        // Stale lock 정리 — 이전 크래시로 남은 lock 파일이 gateway 시작을 방해할 수 있음
+        cleanStaleLockFiles()
+
+        // 심링크 보장 — /home/pocketserver/.openclaw → /root/.openclaw (identity 통합)
+        ensureOpenclawSymlink()
+
         // config 존재 확인 + 마이그레이션
         val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
         if (!configFile.exists()) {
@@ -912,6 +925,40 @@ os.networkInterfaces = function() {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to patch commands.restart", e)
         }
+    }
+
+    /**
+     * /home/pocketserver/.openclaw → /root/.openclaw 심링크 생성.
+     * SSH 로그인(HOME=/home/pocketserver)과 gateway(HOME=/root)에서
+     * 동일한 config/identity를 참조하도록 통합. device_token_mismatch 방지.
+     */
+    private suspend fun ensureOpenclawSymlink() {
+        val result = prootManager.exec(
+            "/bin/bash", "-c",
+            "if [ -d /home/pocketserver/.openclaw ] && [ ! -L /home/pocketserver/.openclaw ]; then " +
+            "  rm -rf /home/pocketserver/.openclaw && " +
+            "  ln -s /root/.openclaw /home/pocketserver/.openclaw && " +
+            "  echo 'symlink_created'; " +
+            "elif [ ! -e /home/pocketserver/.openclaw ]; then " +
+            "  ln -s /root/.openclaw /home/pocketserver/.openclaw && " +
+            "  echo 'symlink_created'; " +
+            "else " +
+            "  echo 'symlink_exists'; " +
+            "fi"
+        )
+        Log.i(TAG, "ensureOpenclawSymlink: ${result.output.trim()}")
+    }
+
+    /**
+     * Stale lock 파일 정리 — 이전 크래시로 남은 lock 파일이 gateway 시작을 방해.
+     * Lock 파일은 싱글 인스턴스 보장용이지만, PRoot에서 비정상 종료 시 삭제되지 않음.
+     */
+    private suspend fun cleanStaleLockFiles() {
+        val result = prootManager.exec(
+            "/bin/bash", "-c",
+            "rm -f /tmp/openclaw-0/*.lock 2>/dev/null && echo 'locks_cleaned' || echo 'no_locks'"
+        )
+        Log.i(TAG, "cleanStaleLockFiles: ${result.output.trim()}")
     }
 
     private fun killAndroidProcesses(namePattern: String) {
