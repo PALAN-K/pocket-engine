@@ -158,39 +158,46 @@ os.networkInterfaces = function() {
         val envVarName = when (provider) {
             "groq" -> "GROQ_API_KEY"
             "openai" -> "OPENAI_API_KEY"
+            "openrouter" -> "OPENROUTER_API_KEY"
             else -> "GEMINI_API_KEY"
         }
 
         val authChoice = when (provider) {
             "groq" -> "groq-api-key"
             "openai" -> "openai-api-key"
+            "openrouter" -> "apiKey"
             else -> "gemini-api-key"
         }
 
         val qualifiedModel = when (provider) {
             "groq" -> "groq/$model"
             "openai" -> "openai/$model"
+            "openrouter" -> "openrouter/$model"
             else -> "google/$model"
         }
 
-        // Step 1: .env 먼저 작성 (openclaw onboard가 env에서 API key를 읽음)
+        // Step 1: .env에 API 키 기록 (기존 프로바이더 키 보존)
         val envFile = File(rootfsPath, "root/.openclaw/.env")
         envFile.parentFile?.mkdirs()
-        envFile.writeText("$envVarName=$apiKey\n")
-        Log.i(TAG, "Wrote $envVarName to .env")
+        val existingEnv = readExistingEnvKeys(envFile)
+        existingEnv[envVarName] = apiKey
+        envFile.writeText(existingEnv.entries.joinToString("\n") { "${it.key}=${it.value}" } + "\n")
+        Log.i(TAG, "Wrote $envVarName to .env (preserved ${existingEnv.size} keys total)")
 
         // PRoot 명령 공통 프리앰블: .env 소싱 + bionic bypass
         val preamble = "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
             "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; "
 
         // Step 2: openclaw onboard --non-interactive (공식 CLI로 설정)
-        Log.i(TAG, "Running openclaw onboard --non-interactive")
+        val tokenProviderFlag = if (provider == "openrouter") "--token-provider openrouter " else ""
+        Log.i(TAG, "Running openclaw onboard --non-interactive (provider=$provider)")
         val onboardResult = prootManager.exec(
             "/bin/bash", "-c",
             preamble +
             "openclaw onboard --non-interactive " +
                 "--accept-risk " +
                 "--auth-choice $authChoice " +
+                "$tokenProviderFlag" +
                 "--mode local " +
                 "--workspace /root/.openclaw/workspace " +
                 "--skip-skills " +
@@ -793,46 +800,83 @@ os.networkInterfaces = function() {
                 is String -> modelObj
                 else -> ""
             }
+            // openrouter/ 는 openai/ 보다 먼저 체크 (openrouter/openai/... 패턴 대응)
             val provider = when {
                 model.startsWith("groq/") -> "groq"
                 model.startsWith("google/") -> "gemini"
                 model.startsWith("openai-codex/") -> "chatgpt"
+                model.startsWith("openrouter/") -> "openrouter"
                 model.startsWith("openai/") -> "openai"
                 else -> ""
             }
             val displayModel = model.removePrefix("groq/").removePrefix("google/")
-                .removePrefix("openai-codex/").removePrefix("openai/")
+                .removePrefix("openai-codex/").removePrefix("openrouter/").removePrefix("openai/")
 
-            // api_key: chatgpt(OAuth)이면 "OAUTH", 아니면 .env에서 읽기
+            // .env에서 모든 API 키 읽기
+            val allEnvKeys = try {
+                val envFile = File(rootfsPath, "root/.openclaw/.env")
+                if (envFile.exists()) {
+                    envFile.readLines()
+                        .filter { it.contains("=") && it.isNotBlank() }
+                        .associate { it.substringBefore("=") to it.substringAfter("=").trim() }
+                } else emptyMap()
+            } catch (_: Exception) { emptyMap() }
+
             val apiKey = if (provider == "chatgpt") {
                 "OAUTH"
             } else {
-                try {
-                    val envFile = File(rootfsPath, "root/.openclaw/.env")
-                    if (envFile.exists()) {
-                        envFile.readLines()
-                            .firstOrNull { it.contains("API_KEY=") }
-                            ?.substringAfter("=")
-                            ?.trim()
-                            ?: ""
-                    } else ""
-                } catch (_: Exception) { "" }
+                val envVarName = when (provider) {
+                    "groq" -> "GROQ_API_KEY"
+                    "openai" -> "OPENAI_API_KEY"
+                    "openrouter" -> "OPENROUTER_API_KEY"
+                    else -> "GEMINI_API_KEY"
+                }
+                allEnvKeys[envVarName] ?: ""
             }
 
-            // telegram_token: openclaw.json에서 읽기
             val telegramToken = json.optJSONObject("channels")
                 ?.optJSONObject("telegram")
                 ?.optString("botToken", "") ?: ""
 
-            mapOf(
+            val result = mutableMapOf(
                 "provider" to provider,
                 "model" to displayModel,
                 "api_key" to apiKey,
                 "telegram_token" to telegramToken,
             )
+
+            // 모든 저장된 프로바이더 키를 api_key_{provider} 형태로 포함 (UI 프리필용)
+            val envToProvider = mapOf(
+                "GEMINI_API_KEY" to "gemini",
+                "GROQ_API_KEY" to "groq",
+                "OPENAI_API_KEY" to "openai",
+                "OPENROUTER_API_KEY" to "openrouter",
+            )
+            for ((envVar, providerId) in envToProvider) {
+                val savedKey = allEnvKeys[envVar]
+                if (!savedKey.isNullOrEmpty()) {
+                    result["api_key_$providerId"] = savedKey
+                }
+            }
+
+            result.toMap()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read OpenClaw config", e)
             null
+        }
+    }
+
+    /** 기존 .env 파일에서 KEY=VALUE 쌍을 읽어 반환 (프로바이더 전환 시 기존 API 키 보존용) */
+    private fun readExistingEnvKeys(envFile: File): MutableMap<String, String> {
+        if (!envFile.exists()) return mutableMapOf()
+        return try {
+            envFile.readLines()
+                .filter { it.contains("=") && it.isNotBlank() }
+                .associate { it.substringBefore("=") to it.substringAfter("=") }
+                .toMutableMap()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read existing .env for merge", e)
+            mutableMapOf()
         }
     }
 

@@ -83,6 +83,19 @@ object ServiceCatalog {
             ),
         ),
         ProviderDef(
+            id = "openrouter",
+            displayName = "OpenRouter (300+ 모델, 자동 로테이션)",
+            apiKeyPrefix = "sk-or-v1-",
+            apiKeyRegex = "^sk-or-v1-[a-f0-9]{64}$",
+            apiKeyHelpUrl = "https://openrouter.ai/keys",
+            apiKeyHelpLabel = "OpenRouter API 키 받기",
+            models = listOf(
+                ModelDef("google/gemini-2.5-flash", "Gemini 2.5 Flash (무료)"),
+                ModelDef("meta-llama/llama-3.3-70b-instruct", "Llama 3.3 70B (무료)"),
+                ModelDef("openai/gpt-oss-120b", "GPT-OSS 120B (무료)"),
+            ),
+        ),
+        ProviderDef(
             id = "chatgpt",
             displayName = "ChatGPT 구독 (추가비용 없음)",
             apiKeyPrefix = "",

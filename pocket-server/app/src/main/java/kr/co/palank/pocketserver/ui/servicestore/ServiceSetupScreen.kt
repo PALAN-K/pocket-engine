@@ -245,6 +245,19 @@ private fun InputStep(
 
     var selectedProvider by remember(isReconfiguring) { mutableStateOf(initialProvider) }
     var selectedModel by remember(isReconfiguring) { mutableStateOf(initialModel) }
+    // 프로바이더별 API 키 캐시 (전환 시 이전 키 보존)
+    val apiKeyCache = remember(isReconfiguring) {
+        mutableStateMapOf<String, String>().also { cache ->
+            if (isReconfiguring) {
+                providers.forEach { p ->
+                    val savedKey = reconfigureDefaults["api_key_${p.id}"]
+                    if (!savedKey.isNullOrEmpty()) {
+                        cache[p.id] = savedKey
+                    }
+                }
+            }
+        }
+    }
     var apiKeyValue by remember(isReconfiguring) { mutableStateOf(if (isReconfiguring) reconfigureDefaults["api_key"] ?: "" else "") }
     val inputValues = remember(isReconfiguring) { mutableStateMapOf<String, String>().also { map ->
         if (isReconfiguring) {
@@ -335,9 +348,12 @@ private fun InputStep(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .clickable {
+                                if (!selectedProvider.isOAuth && apiKeyValue.isNotBlank()) {
+                                    apiKeyCache[selectedProvider.id] = apiKeyValue
+                                }
                                 selectedProvider = provider
                                 selectedModel = provider.models.first()
-                                apiKeyValue = ""
+                                apiKeyValue = if (provider.isOAuth) "" else apiKeyCache[provider.id] ?: ""
                             }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -345,9 +361,12 @@ private fun InputStep(
                         RadioButton(
                             selected = selectedProvider.id == provider.id,
                             onClick = {
+                                if (!selectedProvider.isOAuth && apiKeyValue.isNotBlank()) {
+                                    apiKeyCache[selectedProvider.id] = apiKeyValue
+                                }
                                 selectedProvider = provider
                                 selectedModel = provider.models.first()
-                                apiKeyValue = ""
+                                apiKeyValue = if (provider.isOAuth) "" else apiKeyCache[provider.id] ?: ""
                             },
                             colors = RadioButtonDefaults.colors(
                                 selectedColor = colorScheme.primary,

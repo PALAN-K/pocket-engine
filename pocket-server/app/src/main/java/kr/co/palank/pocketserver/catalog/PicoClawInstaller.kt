@@ -73,6 +73,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         val qualifiedModel = when (provider) {
             "groq" -> "groq/$model"
             "openai" -> "openai/$model"
+            "openrouter" -> "openrouter/$model"
             else -> model
         }
 
@@ -80,8 +81,16 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         val apiBase = when (provider) {
             "gemini" -> "https://generativelanguage.googleapis.com/v1beta/openai"
             "openai" -> "https://api.openai.com/v1"
+            "openrouter" -> "https://openrouter.ai/api/v1"
             else -> ""
         }
+
+        // 기존 config에서 다른 프로바이더 API 키 보존
+        val mergedProviders = readExistingProviders()
+        mergedProviders.put(provider, JSONObject().apply {
+            put("api_key", apiKey)
+            put("api_base", apiBase)
+        })
 
         val config = JSONObject().apply {
             put("agents", JSONObject().apply {
@@ -94,12 +103,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
                     put("max_tool_iterations", 20)
                 })
             })
-            put("providers", JSONObject().apply {
-                put(provider, JSONObject().apply {
-                    put("api_key", apiKey)
-                    put("api_base", apiBase)
-                })
-            })
+            put("providers", mergedProviders)
             put("channels", JSONObject().apply {
                 put("telegram", JSONObject().apply {
                     put("enabled", true)
@@ -217,7 +221,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             Log.i(TAG, "Existing Codex auth.json found, reusing (skip browser login)")
         }
 
-        // Step 5: PicoClaw config 작성 (codex-cli 프로바이더)
+        // Step 5: PicoClaw config 작성 (codex-cli 프로바이더, 기존 API 키 보존)
         val config = JSONObject().apply {
             put("agents", JSONObject().apply {
                 put("defaults", JSONObject().apply {
@@ -230,7 +234,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
                     put("max_tool_iterations", 20)
                 })
             })
-            put("providers", JSONObject())
+            put("providers", readExistingProviders())
             put("channels", JSONObject().apply {
                 put("telegram", JSONObject().apply {
                     put("enabled", true)
@@ -398,21 +402,51 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             }
 
             val providers = json.optJSONObject("providers")
-            val provider = providers?.keys()?.asSequence()?.firstOrNull() ?: ""
-            val displayModel = rawModel.removePrefix("groq/").removePrefix("gemini/").removePrefix("openai/")
 
-            val apiKey = providers?.optJSONObject(provider)?.optString("api_key", "") ?: ""
+            // 현재 활성 프로바이더: 모델 prefix로 판별
+            val activeProvider = when {
+                rawModel.startsWith("openrouter/") -> "openrouter"
+                rawModel.startsWith("groq/") -> "groq"
+                rawModel.startsWith("openai/") -> "openai"
+                else -> providers?.keys()?.asSequence()?.firstOrNull() ?: ""
+            }
+            val displayModel = rawModel.removePrefix("openrouter/").removePrefix("groq/")
+                .removePrefix("gemini/").removePrefix("openai/")
+
+            val apiKey = providers?.optJSONObject(activeProvider)?.optString("api_key", "") ?: ""
             val telegramToken = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("token", "") ?: ""
 
-            mapOf(
-                "provider" to provider,
+            val result = mutableMapOf(
+                "provider" to activeProvider,
                 "model" to displayModel,
                 "api_key" to apiKey,
                 "telegram_token" to telegramToken,
             )
+
+            // 모든 저장된 프로바이더 키를 api_key_{provider} 형태로 포함 (UI 프리필용)
+            providers?.keys()?.forEach { key ->
+                val savedKey = providers.optJSONObject(key)?.optString("api_key", "") ?: ""
+                if (savedKey.isNotEmpty()) {
+                    result["api_key_$key"] = savedKey
+                }
+            }
+
+            result.toMap()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read PicoClaw config", e)
             null
+        }
+    }
+
+    /** 기존 config.json에서 providers 객체를 읽어 반환 (프로바이더 전환 시 기존 API 키 보존용) */
+    private fun readExistingProviders(): JSONObject {
+        val configFile = File(rootfsPath, "root/.picoclaw/config.json")
+        if (!configFile.exists()) return JSONObject()
+        return try {
+            JSONObject(configFile.readText()).optJSONObject("providers") ?: JSONObject()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read existing providers for merge", e)
+            JSONObject()
         }
     }
 
