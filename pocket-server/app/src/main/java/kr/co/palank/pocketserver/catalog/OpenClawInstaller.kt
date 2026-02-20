@@ -796,6 +796,40 @@ os.networkInterfaces = function() {
         result.output.trim() == "running"
     }
 
+    /**
+     * Gateway 프로세스가 살아있고, HTTP 엔드포인트가 실제로 응답하는지 확인.
+     * 프로세스만 살아있고 Telegram 등 채널이 죽어있는 "좀비 게이트웨이" 감지.
+     */
+    override suspend fun isHealthy(): Boolean = withContext(Dispatchers.IO) {
+        if (!isRunning()) return@withContext false
+
+        // Gateway HTTP 엔드포인트 응답 확인 (127.0.0.1:18789)
+        val result = prootManager.exec(
+            "/bin/bash", "-c",
+            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 http://127.0.0.1:18789/ 2>/dev/null"
+        )
+        val httpCode = result.output.trim()
+        val httpOk = httpCode == "200" || httpCode == "302" || httpCode == "401"
+
+        if (!httpOk) {
+            Log.w(TAG, "Gateway unhealthy: process alive but HTTP returned '$httpCode'")
+            return@withContext false
+        }
+
+        // 로그에서 최근 활동 확인 — 마지막 로그가 30분 이상 오래되면 비정상
+        val logFile = File(rootfsPath, "tmp/openclaw.log")
+        if (logFile.exists()) {
+            val lastModified = logFile.lastModified()
+            val staleMs = System.currentTimeMillis() - lastModified
+            if (staleMs > 30 * 60 * 1000) {
+                Log.w(TAG, "Gateway unhealthy: log file stale for ${staleMs / 60000}min")
+                return@withContext false
+            }
+        }
+
+        true
+    }
+
     override fun isInstalled(): Boolean {
         val globalNodeModules = File(rootfsPath, "usr/lib/node_modules/openclaw")
         val localNodeModules = File(rootfsPath, "usr/local/lib/node_modules/openclaw")

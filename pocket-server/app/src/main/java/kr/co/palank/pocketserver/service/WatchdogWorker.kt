@@ -72,21 +72,30 @@ class WatchdogWorker(
                 val installer = def.installer(context)
                 if (!installer.isInstalled()) continue
 
-                val running = runBlocking { installer.isRunning() }
-                if (running) {
-                    // 실행 중 → 재시작 카운터 초기화
+                val healthy = runBlocking { installer.isHealthy() }
+                if (healthy) {
+                    // 정상 동작 중 → 재시작 카운터 초기화
                     prefs.edit().putInt("${KEY_SERVICE_RESTART_COUNT}_${def.id}", 0).apply()
                     continue
                 }
 
-                // 크래시 감지: 설치되어 있지만 실행 중이 아님
+                // 비정상: 프로세스 크래시 또는 좀비 (프로세스는 살아있지만 서비스 응답 없음)
+                val running = runBlocking { installer.isRunning() }
                 val restartCount = prefs.getInt("${KEY_SERVICE_RESTART_COUNT}_${def.id}", 0)
                 if (restartCount >= MAX_AUTO_RESTART_COUNT) {
-                    Log.w(TAG, "${def.name} crashed ${restartCount}+ times, skipping auto-restart")
+                    Log.w(TAG, "${def.name} failed ${restartCount}+ times, skipping auto-restart")
                     continue
                 }
 
-                Log.i(TAG, "${def.name} not running, auto-restarting (attempt ${restartCount + 1}/$MAX_AUTO_RESTART_COUNT)")
+                if (running) {
+                    // 좀비 감지: 프로세스는 살아있지만 서비스가 응답하지 않음 → 강제 종료 후 재시작
+                    Log.w(TAG, "${def.name} zombie detected (process alive but unhealthy), killing before restart")
+                    runBlocking { installer.stop() }
+                } else {
+                    Log.i(TAG, "${def.name} not running, preparing auto-restart")
+                }
+
+                Log.i(TAG, "${def.name} auto-restarting (attempt ${restartCount + 1}/$MAX_AUTO_RESTART_COUNT)")
                 val started = runBlocking { installer.start() }
                 prefs.edit().putInt(
                     "${KEY_SERVICE_RESTART_COUNT}_${def.id}",
