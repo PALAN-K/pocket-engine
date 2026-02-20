@@ -923,7 +923,8 @@ print('OK: {} -> {} bytes'.format(len(compressed), len(decompressed)))
                 "else " +
                 "  apt-get install -y -qq gcc 2>&1 && " +
                 "  gcc -shared -fPIC -nostartfiles -o /usr/local/lib/libnetstub.so /tmp/netstub.c -ldl 2>&1; " +
-                "fi"
+                "fi",
+                timeoutMs = 600_000  // 10분: gcc fallback 설치 시 apt-get이 오래 걸림
             )
 
             if (netstubSo.exists() && netstubSo.length() > 0) {

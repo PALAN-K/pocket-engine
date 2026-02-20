@@ -68,17 +68,19 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
         Log.i(TAG, "Node.js verified: $versionOutput")
 
         // Step 4: npm 전역 경로 보장 + git + build-essential (git: npm의 GitHub URL 의존성 해소 필수)
-        onProgress(35, "빌드 도구 설치 중...")
+        onProgress(35, "빌드 도구 설치 중... (약 5-10분)")
         prootManager.exec(
             "/bin/bash", "-c",
-            "mkdir -p /usr/local/lib/node_modules && apt-get update -qq 2>/dev/null; apt-get install -y git build-essential 2>/dev/null || true"
+            "mkdir -p /usr/local/lib/node_modules && apt-get update -qq 2>/dev/null; apt-get install -y git build-essential 2>/dev/null || true",
+            timeoutMs = 600_000  // 10분: build-essential = gcc/g++ 등 60+ 패키지, 구형폰 PRoot에서 5-10분
         )
 
         // Step 5: OpenClaw 설치 (--jobs=1로 병렬 컴파일 방지 → 3GB RAM OOM 방지)
         onProgress(40, "OpenClaw 설치 중... (약 5-15분)")
         result = prootManager.exec(
             "/bin/bash", "-c",
-            "npm install -g openclaw --no-color --jobs=1 2>&1"
+            "npm install -g openclaw --no-color --jobs=1 2>&1",
+            timeoutMs = 900_000  // 15분: npm install on PRoot 구형폰에서 5-15분
         )
         if (!result.isSuccess) {
             // 1회 재시도: npm cache 정리 후 다시 설치
@@ -87,7 +89,8 @@ class OpenClawInstaller(private val context: Context) : ServiceInstaller {
             prootManager.exec("/bin/bash", "-c", "npm cache clean --force 2>/dev/null")
             result = prootManager.exec(
                 "/bin/bash", "-c",
-                "npm install -g openclaw --no-color --jobs=1 2>&1"
+                "npm install -g openclaw --no-color --jobs=1 2>&1",
+                timeoutMs = 900_000  // 15분: 재시도도 동일 타임아웃
             )
             if (!result.isSuccess) {
                 val cleanErr = cleanOutput(result.output.takeLast(500))
