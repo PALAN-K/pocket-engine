@@ -251,7 +251,7 @@ os.networkInterfaces = function() {
             "openclaw config set channels.telegram.enabled true",
             "openclaw config set channels.telegram.botToken \"$telegramToken\"",
             "openclaw config set channels.telegram.dmPolicy open",
-            "openclaw config set channels.telegram.allowFrom '[\"*\"]'",
+            "openclaw config set channels.telegram.allowFrom '[]'",
         )
 
         for (cmd in telegramCommands) {
@@ -379,7 +379,7 @@ os.networkInterfaces = function() {
                     put("enabled", true)
                     put("botToken", telegramToken)
                     put("dmPolicy", "open")
-                    put("allowFrom", org.json.JSONArray().apply { put("*") })
+                    put("allowFrom", org.json.JSONArray())
                 })
             })
             put("commands", JSONObject().apply {
@@ -556,9 +556,7 @@ os.networkInterfaces = function() {
                     put("enabled", true)
                     put("botToken", telegramToken)
                     put("dmPolicy", "open")
-                    put("allowFrom", org.json.JSONArray().apply {
-                        put("*")
-                    })
+                    put("allowFrom", org.json.JSONArray())
                 })
             })
             put("commands", JSONObject().apply {
@@ -584,7 +582,7 @@ os.networkInterfaces = function() {
                 put("enabled", true)
                 put("botToken", telegramToken)
                 put("dmPolicy", "open")
-                put("allowFrom", org.json.JSONArray().apply { put("*") })
+                put("allowFrom", org.json.JSONArray())
             })
             config.put("channels", channels)
 

@@ -14,4 +14,3 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "PocketServer"
-include ":app"

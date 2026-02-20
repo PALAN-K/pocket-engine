@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">PocketServer</string>
-    <string name="welcome_title">PocketServer</string>
-    <string name="welcome_subtitle">서랍 속 스마트폰이 나만의 서버가 됩니다</string>
-    <string name="btn_install">서버 설치 시작</string>
-    <string name="status_idle">대기 중</string>
-    <string name="status_running">서버 실행 중</string>
-</resources>
