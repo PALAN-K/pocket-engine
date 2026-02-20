@@ -75,6 +75,9 @@ start_openclaw.sh
 # External project data (not part of PocketServer)
 notebookserver_openclaw/
 
+# MCP vector search model files
+models/
+
 # OS
 Thumbs.db
 Desktop.ini
