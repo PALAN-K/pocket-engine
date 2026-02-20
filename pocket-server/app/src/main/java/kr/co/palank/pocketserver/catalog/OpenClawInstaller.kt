@@ -190,9 +190,9 @@ os.networkInterfaces = function() {
         envFile.writeText(existingEnv.entries.joinToString("\n") { "${it.key}=${it.value}" } + "\n")
         Log.i(TAG, "Wrote $envVarName to .env (preserved ${existingEnv.size} keys total)")
 
-        // PRoot 명령 공통 프리앰블: .env 소싱 + bionic bypass
+        // PRoot 명령 공통 프리앰블: .env 소싱 + bionic bypass (net-fix.js는 ProotManager가 보장)
         val preamble = "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
-            "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; "
+            "export NODE_OPTIONS='--require /usr/local/lib/net-fix.js'; "
 
         // Step 2: openclaw onboard --non-interactive (공식 CLI로 설정)
         val tokenProviderFlag = if (provider == "openrouter") "--token-provider openrouter " else ""
@@ -289,7 +289,7 @@ os.networkInterfaces = function() {
         model: String,
         telegramToken: String,
     ) {
-        val preamble = "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; "
+        val preamble = "export NODE_OPTIONS='--require /usr/local/lib/net-fix.js'; "
 
         // Step 1: Codex CLI 설치 확인 (PicoClaw가 먼저 설치했을 수 있음)
         val codexCheck = prootManager.exec("/bin/bash", "-c", "codex --version 2>&1")
@@ -687,7 +687,7 @@ os.networkInterfaces = function() {
         val cmd = prootManager.buildEnvWrappedCommand(
             "/bin/bash", "-c",
             "set -a; [ -f /root/.openclaw/.env ] && . /root/.openclaw/.env; set +a; " +
-            "export NODE_OPTIONS='--require /usr/local/lib/openclaw-bionic-bypass.js'; " +
+            "export NODE_OPTIONS='--require /usr/local/lib/net-fix.js'; " +
             "exec openclaw gateway run",
             killOnExit = false
         )
@@ -708,7 +708,7 @@ os.networkInterfaces = function() {
             if (openclawProcess?.isAlive != true) {
                 // 프로세스가 조기 종료 — 로그에서 원인 확인
                 val lastLines = try {
-                    logFile.readLines().takeLast(5).joinToString("\n")
+                    logFile.readLines().takeLast(20).joinToString("\n")
                 } catch (_: Exception) { "로그 읽기 실패" }
                 Log.e(TAG, "OpenClaw died after ${i}s. Last log:\n$lastLines")
                 return false
@@ -1047,7 +1047,7 @@ os.networkInterfaces = function() {
     private suspend fun cleanStaleLockFiles() {
         val result = prootManager.exec(
             "/bin/bash", "-c",
-            "for f in /tmp/openclaw-0/*.lock 2>/dev/null; do " +
+            "for f in /tmp/openclaw-0/*.lock; do " +
             "  [ -f \"\$f\" ] || continue; " +
             "  pid=\$(grep -oP '\"pid\"\\s*:\\s*\\K[0-9]+' \"\$f\" 2>/dev/null); " +
             "  if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then " +
