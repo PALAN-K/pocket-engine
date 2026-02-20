@@ -53,10 +53,10 @@ interface ServiceInstaller {
     fun readCurrentConfig(): Map<String, String>?
 
     /**
-     * 서비스가 실제로 정상 동작하는지 확인 (프로세스 생존 + 기능 응답).
-     * isRunning()은 프로세스 존재만 체크하지만, isHealthy()는 HTTP 응답 등
-     * 실제 서비스 기능이 살아있는지까지 검증한다.
-     * 기본 구현은 isRunning()에 위임 — 서비스별로 오버라이드 가능.
+     * 서비스가 정상 동작하는지 확인.
+     * 기본 구현은 프로세스 존재 여부(isRunning)로 판단.
+     * OpenClaw/PicoClaw는 자체 restart + heartbeat가 있으므로
+     * 외부 헬스체크 오버라이드 없이 기본 구현을 사용한다.
      */
     suspend fun isHealthy(): Boolean = isRunning()
 }

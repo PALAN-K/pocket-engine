@@ -305,14 +305,13 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             if (proc.isAlive) proc.destroyForcibly()
         }
         picoClawProcess = null
-        // Android-side pkill: PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없음
         killAndroidProcesses("picoclaw gateway")
         prootManager.exec(
             "/bin/bash", "-c",
             "pkill -f 'picoclaw gateway' 2>/dev/null; sleep 1"
         )
 
-        // config 존재 확인 + 마이그레이션
+        // config 존재 확인
         val configFile = File(rootfsPath, "root/.picoclaw/config.json")
         if (!configFile.exists()) {
             Log.w(TAG, "PicoClaw config not found, skipping start")
@@ -336,9 +335,9 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
 
         picoClawProcess = pb.start()
 
-        // 시작 검증: 최대 10초 polling (1초 간격)
-        var alive = false
-        for (i in 1..10) {
+        // 시작 검증: 3초 생존하면 성공 (초기 크래시 감지만 수행)
+        // 이후 라이프사이클은 PicoClaw 자체 heartbeat + restart에 위임
+        for (i in 1..5) {
             delay(1000)
             if (picoClawProcess?.isAlive != true) {
                 val lastLines = try {
@@ -347,13 +346,11 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
                 Log.e(TAG, "PicoClaw died after ${i}s. Last log:\n$lastLines")
                 return false
             }
-            if (i >= 3) {
-                alive = true
-                break
-            }
+            if (i >= 3) break
         }
-        Log.i(TAG, "PicoClaw start: alive=$alive")
-        return alive
+
+        Log.i(TAG, "PicoClaw started successfully")
+        return true
     }
 
     override suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
@@ -383,49 +380,9 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         result.output.trim() == "running"
     }
 
-    /**
-     * PicoClaw 게이트웨이가 실제로 정상 동작하는지 확인.
-     * HTTP 포트 18790 응답 + Telegram Bot API 도달 가능성 체크.
-     */
-    override suspend fun isHealthy(): Boolean = withContext(Dispatchers.IO) {
-        if (!isRunning()) return@withContext false
-
-        // 1) PicoClaw 게이트웨이 HTTP 체크 (port 18790)
-        val httpResult = prootManager.exec(
-            "/bin/bash", "-c",
-            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 http://127.0.0.1:18790/ 2>/dev/null"
-        )
-        val httpCode = httpResult.output.trim()
-        if (httpCode == "000") {
-            Log.w(TAG, "PicoClaw unhealthy: gateway port 18790 not responding")
-            return@withContext false
-        }
-
-        // 2) Telegram Bot API ping
-        val configFile = File(rootfsPath, "root/.picoclaw/config.json")
-        val botToken = readBotToken(configFile)
-        if (botToken != null) {
-            val tgResult = prootManager.exec(
-                "/bin/bash", "-c",
-                "curl -s --connect-timeout 5 --max-time 10 'https://api.telegram.org/bot$botToken/getMe' 2>/dev/null"
-            )
-            if (!tgResult.output.contains("\"ok\":true")) {
-                Log.w(TAG, "PicoClaw unhealthy: Telegram API unreachable")
-                return@withContext false
-            }
-        }
-
-        true
-    }
-
-    private fun readBotToken(configFile: File): String? {
-        if (!configFile.exists()) return null
-        return try {
-            val json = JSONObject(configFile.readText())
-            val token = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("token", "") ?: ""
-            token.ifEmpty { null }
-        } catch (_: Exception) { null }
-    }
+    // isHealthy()는 ServiceInstaller 기본 구현(= isRunning()) 사용.
+    // PicoClaw 자체 heartbeat + restart가 라이프사이클을 관리하므로
+    // 외부에서 로그 파싱으로 감시하지 않음.
 
     override fun isInstalled(): Boolean {
         return File(rootfsPath, "usr/local/bin/picoclaw").exists()

@@ -11,6 +11,7 @@ import kr.co.palank.pocketserver.linux.ServerState
 import kr.co.palank.pocketserver.util.BatteryMonitor
 import java.util.concurrent.TimeUnit
 
+
 class WatchdogWorker(
     appContext: Context,
     params: WorkerParameters
@@ -55,7 +56,7 @@ class WatchdogWorker(
 
             // 서버가 실행 중일 때만 서비스 크래시 복구 수행
             if (currentState is ServerState.Running) {
-                checkAndRecoverServices(context, prefs)
+                checkAndRecoverServices(context)
             }
         }
 
@@ -63,49 +64,26 @@ class WatchdogWorker(
     }
 
     /**
-     * 설치된 서비스(PicoClaw/OpenClaw)가 크래시되었는지 확인하고 자동 복구.
-     * 최대 MAX_AUTO_RESTART_COUNT회까지 자동 재시작, 초과 시 포기.
+     * 설치된 서비스(PicoClaw/OpenClaw)가 죽었으면 1회 재시작.
+     * 로그 파싱이나 좀비 감지 없이 프로세스 존재 여부(pgrep)만 확인.
+     * 서비스 자체 restart + heartbeat가 라이프사이클을 관리하므로
+     * 외부에서는 "프로세스가 완전히 죽었을 때"만 개입한다.
      */
-    private fun checkAndRecoverServices(context: Context, prefs: android.content.SharedPreferences) {
+    private fun checkAndRecoverServices(context: Context) {
         try {
             for (def in ServiceCatalog.services) {
                 val installer = def.installer(context)
                 if (!installer.isInstalled()) continue
 
-                val healthy = runBlocking { installer.isHealthy() }
-                if (healthy) {
-                    // 정상 동작 중 → 재시작 카운터 초기화
-                    prefs.edit().putInt("${KEY_SERVICE_RESTART_COUNT}_${def.id}", 0).apply()
-                    continue
-                }
-
-                // 비정상: 프로세스 크래시 또는 좀비 (프로세스는 살아있지만 서비스 응답 없음)
                 val running = runBlocking { installer.isRunning() }
-                val restartCount = prefs.getInt("${KEY_SERVICE_RESTART_COUNT}_${def.id}", 0)
-                if (restartCount >= MAX_AUTO_RESTART_COUNT) {
-                    Log.w(TAG, "${def.name} failed ${restartCount}+ times, skipping auto-restart")
-                    continue
-                }
+                if (running) continue
 
-                if (running) {
-                    // 좀비 감지: 프로세스는 살아있지만 서비스가 응답하지 않음 → 강제 종료 후 재시작
-                    Log.w(TAG, "${def.name} zombie detected (process alive but unhealthy), killing before restart")
-                    runBlocking { installer.stop() }
-                } else {
-                    Log.i(TAG, "${def.name} not running, preparing auto-restart")
-                }
-
-                Log.i(TAG, "${def.name} auto-restarting (attempt ${restartCount + 1}/$MAX_AUTO_RESTART_COUNT)")
+                Log.i(TAG, "${def.name} not running, attempting restart")
                 val started = runBlocking { installer.start() }
-                prefs.edit().putInt(
-                    "${KEY_SERVICE_RESTART_COUNT}_${def.id}",
-                    if (started) 0 else restartCount + 1
-                ).apply()
-
                 if (started) {
-                    Log.i(TAG, "${def.name} auto-restarted successfully")
+                    Log.i(TAG, "${def.name} restarted successfully")
                 } else {
-                    Log.e(TAG, "${def.name} auto-restart failed (attempt ${restartCount + 1})")
+                    Log.e(TAG, "${def.name} restart failed")
                 }
             }
         } catch (e: Exception) {
@@ -119,8 +97,6 @@ class WatchdogWorker(
         private const val PREFS_NAME = "server_prefs"
         private const val KEY_SERVER_SHOULD_RUN = "server_should_run"
         private const val KEY_THERMAL_STOPPED = "thermal_stopped"
-        private const val KEY_SERVICE_RESTART_COUNT = "service_restart_count"
-        private const val MAX_AUTO_RESTART_COUNT = 3
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<WatchdogWorker>(

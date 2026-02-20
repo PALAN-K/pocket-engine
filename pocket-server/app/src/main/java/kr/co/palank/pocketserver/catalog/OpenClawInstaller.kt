@@ -289,8 +289,6 @@ os.networkInterfaces = function() {
         model: String,
         telegramToken: String,
     ) {
-        val preamble = "export NODE_OPTIONS='--require /usr/local/lib/net-fix.js'; "
-
         // Step 1: Codex CLI 설치 확인 (PicoClaw가 먼저 설치했을 수 있음)
         val codexCheck = prootManager.exec("/bin/bash", "-c", "codex --version 2>&1")
         if (!codexCheck.isSuccess || !codexCheck.output.contains(".")) {
@@ -658,8 +656,6 @@ os.networkInterfaces = function() {
             if (proc.isAlive) proc.destroyForcibly()
         }
         openclawProcess = null
-        // Android-side pkill: PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없음.
-        // Android shell에서 실행하면 같은 UID의 모든 프로세스를 죽일 수 있음.
         killAndroidProcesses("openclaw gateway run")
         prootManager.exec(
             "/bin/bash", "-c",
@@ -672,16 +668,13 @@ os.networkInterfaces = function() {
         // 심링크 보장 — /home/pocketserver/.openclaw → /root/.openclaw (identity 통합)
         ensureOpenclawSymlink()
 
-        // config 존재 확인 + 마이그레이션
+        // config 존재 확인
         val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
         if (!configFile.exists()) {
             Log.w(TAG, "OpenClaw config not found, skipping start")
             return false
         }
         patchCommandsRestart(configFile)
-
-        // doctor --fix 제거: gateway가 자체적으로 auth token을 관리함.
-        // doctor --fix가 config를 수정하면 gateway 시작 시 token mismatch 발생.
 
         // killOnExit=false: PRoot 세션이 OpenClaw와 함께 유지됨
         val cmd = prootManager.buildEnvWrappedCommand(
@@ -701,81 +694,22 @@ os.networkInterfaces = function() {
 
         openclawProcess = pb.start()
 
-        // 시작 검증: 최대 15초 polling (1초 간격)
-        var alive = false
-        for (i in 1..15) {
+        // 시작 검증: 3초 생존하면 성공 (초기 크래시 감지만 수행)
+        // 이후 라이프사이클은 OpenClaw 자체 restart=true에 위임
+        for (i in 1..5) {
             delay(1000)
             if (openclawProcess?.isAlive != true) {
-                // 프로세스가 조기 종료 — 로그에서 원인 확인
                 val lastLines = try {
-                    logFile.readLines().takeLast(20).joinToString("\n")
+                    logFile.readLines().takeLast(10).joinToString("\n")
                 } catch (_: Exception) { "로그 읽기 실패" }
                 Log.e(TAG, "OpenClaw died after ${i}s. Last log:\n$lastLines")
                 return false
             }
-            // 3초 이상 생존하면 성공으로 판단 (초기 크래시 아님)
-            if (i >= 3) {
-                alive = true
-                break
-            }
-        }
-        if (!alive) return false
-
-        // 로그 기반 헬스체크: gateway 초기화 에러 감지 후 1회 재시도
-        delay(5000)
-        if (hasGatewayError(logFile)) {
-            Log.w(TAG, "Gateway error detected in log, retrying once...")
-            openclawProcess?.let { proc ->
-                proc.destroy()
-                if (proc.isAlive) proc.destroyForcibly()
-            }
-            openclawProcess = null
-            killAndroidProcesses("openclaw")
-            prootManager.exec("/bin/bash", "-c", "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1")
-            delay(3000)
-
-            logFile.writeText("")
-            openclawProcess = pb.start()
-
-            var retryAlive = false
-            for (i in 1..15) {
-                delay(1000)
-                if (openclawProcess?.isAlive != true) {
-                    Log.e(TAG, "OpenClaw retry died after ${i}s")
-                    return false
-                }
-                if (i >= 3) {
-                    retryAlive = true
-                    break
-                }
-            }
-            if (!retryAlive) return false
-
-            delay(5000)
-            if (hasGatewayError(logFile)) {
-                Log.e(TAG, "OpenClaw retry also has gateway errors")
-                return false
-            }
-            Log.i(TAG, "OpenClaw start: retry succeeded")
-        } else {
-            Log.i(TAG, "OpenClaw start: alive=true, no gateway errors")
+            if (i >= 3) break
         }
 
+        Log.i(TAG, "OpenClaw started successfully")
         return true
-    }
-
-    private fun hasGatewayError(logFile: File): Boolean {
-        val errorKeywords = listOf("ECONNREFUSED", "device_token_mismatch", "pairing required", "unauthorized", "FATAL ERROR")
-        return try {
-            if (!logFile.exists()) false
-            else {
-                val tail = logFile.readLines().takeLast(20)
-                tail.any { line ->
-                    val lower = line.lowercase()
-                    errorKeywords.any { kw -> lower.contains(kw.lowercase()) }
-                }
-            }
-        } catch (_: Exception) { false }
     }
 
     override suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
@@ -805,74 +739,9 @@ os.networkInterfaces = function() {
         result.output.trim() == "running"
     }
 
-    /**
-     * Gateway 프로세스가 살아있고, HTTP 엔드포인트가 실제로 응답하며,
-     * Telegram Bot API가 도달 가능한지까지 확인.
-     * 프로세스만 살아있고 Telegram 채널이 죽어있는 "좀비 게이트웨이" 감지.
-     */
-    override suspend fun isHealthy(): Boolean = withContext(Dispatchers.IO) {
-        if (!isRunning()) return@withContext false
-
-        // 1) Gateway HTTP 엔드포인트 응답 확인 (127.0.0.1:18789)
-        val httpResult = prootManager.exec(
-            "/bin/bash", "-c",
-            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 http://127.0.0.1:18789/ 2>/dev/null"
-        )
-        val httpCode = httpResult.output.trim()
-        if (httpCode != "200" && httpCode != "302" && httpCode != "401") {
-            Log.w(TAG, "Gateway unhealthy: HTTP returned '$httpCode'")
-            return@withContext false
-        }
-
-        // 2) Telegram Bot API ping — Node.js 네트워크 스택과 무관하게 curl로 직접 확인
-        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
-        val botToken = readBotToken(configFile)
-        if (botToken != null) {
-            val tgResult = prootManager.exec(
-                "/bin/bash", "-c",
-                "curl -s --connect-timeout 5 --max-time 10 'https://api.telegram.org/bot$botToken/getMe' 2>/dev/null"
-            )
-            if (!tgResult.output.contains("\"ok\":true")) {
-                Log.w(TAG, "Gateway unhealthy: Telegram API unreachable")
-                return@withContext false
-            }
-        }
-
-        // 3) 로그 staleness (15분 초과 시 비정상)
-        val logFile = File(rootfsPath, "tmp/openclaw.log")
-        if (logFile.exists()) {
-            val staleMs = System.currentTimeMillis() - logFile.lastModified()
-            if (staleMs > 15 * 60 * 1000) {
-                Log.w(TAG, "Gateway unhealthy: log stale ${staleMs / 60000}min")
-                return@withContext false
-            }
-        }
-
-        // 4) 로그에서 연속 Telegram 에러 감지
-        if (logFile.exists()) {
-            try {
-                val recentLines = logFile.readLines().takeLast(30)
-                val telegramErrors = recentLines.count {
-                    it.contains("sendMessage failed") || it.contains("sendChatAction failed")
-                }
-                if (telegramErrors >= 5) {
-                    Log.w(TAG, "Gateway unhealthy: $telegramErrors Telegram errors in last 30 log lines")
-                    return@withContext false
-                }
-            } catch (_: Exception) { /* log read failure is non-fatal */ }
-        }
-
-        true
-    }
-
-    private fun readBotToken(configFile: File): String? {
-        if (!configFile.exists()) return null
-        return try {
-            val json = JSONObject(configFile.readText())
-            val token = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("botToken", "") ?: ""
-            token.ifEmpty { null }
-        } catch (_: Exception) { null }
-    }
+    // isHealthy()는 ServiceInstaller 기본 구현(= isRunning()) 사용.
+    // OpenClaw 자체 restart=true가 라이프사이클을 관리하므로
+    // 외부에서 로그 파싱/HTTP 체크로 감시하지 않음.
 
     override fun isInstalled(): Boolean {
         val globalNodeModules = File(rootfsPath, "usr/lib/node_modules/openclaw")

@@ -187,20 +187,15 @@ class ServiceManager(private val context: Context) {
                         val installer = getOrCreateInstaller(service.serviceId)
                         if (installer.isInstalled()) {
                             val running = installer.isRunning()
-                            val healthy = if (running) installer.isHealthy() else false
 
-                            if (running && healthy) {
-                                // 정상 동작 중 → 스킵 (불필요 재시작 방지)
+                            if (running) {
+                                // 프로세스가 살아있으면 상태만 RUNNING으로 갱신하고 스킵.
+                                // isHealthy() 기반 좀비 감지는 WatchdogWorker에 위임.
+                                // startAllInstalled()에서 stop+start하면 정상 서비스를
+                                // 불필요하게 재시작하는 원인이 됨.
                                 updateServiceStatus(service.serviceId, ServiceStatus.RUNNING)
-                                Log.i(TAG, "Service ${service.serviceId} already healthy, skipping restart")
+                                Log.i(TAG, "Service ${service.serviceId} already running, skipping")
                                 return@forEach
-                            }
-
-                            if (running && !healthy) {
-                                // 좀비 → 먼저 stop
-                                Log.w(TAG, "Service ${service.serviceId} zombie (running but unhealthy), stopping first")
-                                installer.stop()
-                                delay(2000)
                             }
 
                             val started = installer.start()
