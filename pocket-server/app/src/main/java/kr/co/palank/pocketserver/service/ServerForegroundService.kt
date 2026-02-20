@@ -21,6 +21,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -39,6 +40,8 @@ class ServerForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var ipcServer: IpcServer? = null
     private var browserBridge: BrowserBridge? = null
+    private var stateObserverJob: Job? = null
+    private var lastAutoStartMs = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -104,7 +107,8 @@ class ServerForegroundService : Service() {
     }
 
     private fun observeServerState(manager: SessionManager) {
-        serviceScope.launch {
+        stateObserverJob?.cancel()
+        stateObserverJob = serviceScope.launch {
             manager.state.collect { state ->
                 val (title, content) = when (state) {
                     is ServerState.Idle -> "서버 대기 중" to "시작 버튼을 눌러주세요"
@@ -125,6 +129,12 @@ class ServerForegroundService : Service() {
     }
 
     private fun autoStartInstalledServices() {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoStartMs < AUTO_START_COOLDOWN_MS) {
+            Log.d(TAG, "Auto-start skipped: cooldown (${(now - lastAutoStartMs) / 1000}s ago)")
+            return
+        }
+        lastAutoStartMs = now
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val sm = ServiceManager(this@ServerForegroundService)
@@ -280,6 +290,7 @@ class ServerForegroundService : Service() {
         const val NOTIFICATION_ID = 1
         private const val RESTART_REQUEST_CODE = 99
         private const val RESTART_DELAY_MS = 3000L
+        private const val AUTO_START_COOLDOWN_MS = 60_000L
         const val ACTION_START = "kr.co.palank.pocketserver.ACTION_START"
         const val ACTION_STOP = "kr.co.palank.pocketserver.ACTION_STOP"
         const val ACTION_RESTART = "kr.co.palank.pocketserver.ACTION_RESTART"

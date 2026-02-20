@@ -8,6 +8,8 @@ import android.os.StatFs
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kr.co.palank.pocketserver.linux.ProotManager
 import org.json.JSONObject
@@ -642,7 +644,11 @@ os.networkInterfaces = function() {
      * OpenClaw를 포그라운드 프로세스로 실행. exec()의 --kill-on-exit가
      * nohup 프로세스까지 죽이는 문제를 해결.
      */
-    override suspend fun start(): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun start(): Boolean = startMutex.withLock {
+        withContext(Dispatchers.IO) { doStart() }
+    }
+
+    private suspend fun doStart(): Boolean {
         // 기존 프로세스 정리
         openclawProcess?.let { proc ->
             proc.destroy()
@@ -651,7 +657,7 @@ os.networkInterfaces = function() {
         openclawProcess = null
         // Android-side pkill: PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없음.
         // Android shell에서 실행하면 같은 UID의 모든 프로세스를 죽일 수 있음.
-        killAndroidProcesses("openclaw")
+        killAndroidProcesses("openclaw gateway run")
         prootManager.exec(
             "/bin/bash", "-c",
             "pkill -f 'openclaw gateway run' 2>/dev/null; sleep 1"
@@ -667,7 +673,7 @@ os.networkInterfaces = function() {
         val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
         if (!configFile.exists()) {
             Log.w(TAG, "OpenClaw config not found, skipping start")
-            return@withContext false
+            return false
         }
         patchCommandsRestart(configFile)
 
@@ -702,7 +708,7 @@ os.networkInterfaces = function() {
                     logFile.readLines().takeLast(5).joinToString("\n")
                 } catch (_: Exception) { "로그 읽기 실패" }
                 Log.e(TAG, "OpenClaw died after ${i}s. Last log:\n$lastLines")
-                return@withContext false
+                return false
             }
             // 3초 이상 생존하면 성공으로 판단 (초기 크래시 아님)
             if (i >= 3) {
@@ -710,7 +716,7 @@ os.networkInterfaces = function() {
                 break
             }
         }
-        if (!alive) return@withContext false
+        if (!alive) return false
 
         // 로그 기반 헬스체크: gateway 초기화 에러 감지 후 1회 재시도
         delay(5000)
@@ -733,30 +739,30 @@ os.networkInterfaces = function() {
                 delay(1000)
                 if (openclawProcess?.isAlive != true) {
                     Log.e(TAG, "OpenClaw retry died after ${i}s")
-                    return@withContext false
+                    return false
                 }
                 if (i >= 3) {
                     retryAlive = true
                     break
                 }
             }
-            if (!retryAlive) return@withContext false
+            if (!retryAlive) return false
 
             delay(5000)
             if (hasGatewayError(logFile)) {
                 Log.e(TAG, "OpenClaw retry also has gateway errors")
-                return@withContext false
+                return false
             }
             Log.i(TAG, "OpenClaw start: retry succeeded")
         } else {
             Log.i(TAG, "OpenClaw start: alive=true, no gateway errors")
         }
 
-        true
+        return true
     }
 
     private fun hasGatewayError(logFile: File): Boolean {
-        val errorKeywords = listOf("ECONNREFUSED", "auth", "token", "unauthorized", "FATAL")
+        val errorKeywords = listOf("ECONNREFUSED", "device_token_mismatch", "pairing required", "unauthorized", "FATAL ERROR")
         return try {
             if (!logFile.exists()) false
             else {
@@ -776,7 +782,7 @@ os.networkInterfaces = function() {
         }
         openclawProcess = null
         // Android-side kill (cross-PRoot-session cleanup)
-        killAndroidProcesses("openclaw")
+        killAndroidProcesses("openclaw gateway run")
         // Fallback: PRoot 내 잔여 프로세스 정리
         prootManager.exec(
             "/bin/bash", "-c",
@@ -981,6 +987,19 @@ os.networkInterfaces = function() {
             "fi"
         )
         Log.i(TAG, "ensureOpenclawSymlink: ${result.output.trim()}")
+
+        // HOME=/root 강제: SSH 세션(HOME=/home/pocketserver)에서도 동일 경로 사용
+        // device_token_mismatch 방지 — OpenClaw가 경로 문자열로 identity 비교
+        val profileScript = File(rootfsPath, "etc/profile.d/fix-home.sh")
+        if (!profileScript.exists()) {
+            profileScript.parentFile?.mkdirs()
+            profileScript.writeText(
+                "#!/bin/sh\n" +
+                "export HOME=/root\n" +
+                "cd /root\n"
+            )
+            Log.i(TAG, "Wrote /etc/profile.d/fix-home.sh (HOME=/root)")
+        }
     }
 
     /**
@@ -990,7 +1009,16 @@ os.networkInterfaces = function() {
     private suspend fun cleanStaleLockFiles() {
         val result = prootManager.exec(
             "/bin/bash", "-c",
-            "rm -f /tmp/openclaw-0/*.lock 2>/dev/null && echo 'locks_cleaned' || echo 'no_locks'"
+            "for f in /tmp/openclaw-0/*.lock 2>/dev/null; do " +
+            "  [ -f \"\$f\" ] || continue; " +
+            "  pid=\$(grep -oP '\"pid\"\\s*:\\s*\\K[0-9]+' \"\$f\" 2>/dev/null); " +
+            "  if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then " +
+            "    echo \"live:\$pid\"; " +
+            "  else " +
+            "    rm -f \"\$f\"; " +
+            "    echo \"stale_removed\"; " +
+            "  fi; " +
+            "done"
         )
         Log.i(TAG, "cleanStaleLockFiles: ${result.output.trim()}")
     }
@@ -1012,6 +1040,7 @@ os.networkInterfaces = function() {
         private const val NODE_TARBALL_URL =
             "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-arm64.tar.gz"
         private const val MIN_FREE_DISK_MB = 1024L // 1GB
+        private val startMutex = Mutex()
         @Volatile
         private var openclawProcess: Process? = null
     }

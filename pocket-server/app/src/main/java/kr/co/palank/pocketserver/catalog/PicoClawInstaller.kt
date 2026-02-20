@@ -6,6 +6,8 @@ import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kr.co.palank.pocketserver.linux.ProotManager
 import org.json.JSONObject
@@ -292,7 +294,11 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
      * PicoClaw를 포그라운드 프로세스로 실행. exec()의 --kill-on-exit가
      * nohup 프로세스까지 죽이는 문제를 해결.
      */
-    override suspend fun start(): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun start(): Boolean = startMutex.withLock {
+        withContext(Dispatchers.IO) { doStart() }
+    }
+
+    private suspend fun doStart(): Boolean {
         // 기존 프로세스 정리
         picoClawProcess?.let { proc ->
             proc.destroy()
@@ -300,7 +306,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         }
         picoClawProcess = null
         // Android-side pkill: PRoot 내부 pkill은 다른 PRoot 세션의 프로세스를 볼 수 없음
-        killAndroidProcesses("picoclaw")
+        killAndroidProcesses("picoclaw gateway")
         prootManager.exec(
             "/bin/bash", "-c",
             "pkill -f 'picoclaw gateway' 2>/dev/null; sleep 1"
@@ -310,7 +316,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         val configFile = File(rootfsPath, "root/.picoclaw/config.json")
         if (!configFile.exists()) {
             Log.w(TAG, "PicoClaw config not found, skipping start")
-            return@withContext false
+            return false
         }
         patchCommandsRestart(configFile)
 
@@ -339,7 +345,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
                     logFile.readLines().takeLast(5).joinToString("\n")
                 } catch (_: Exception) { "로그 읽기 실패" }
                 Log.e(TAG, "PicoClaw died after ${i}s. Last log:\n$lastLines")
-                return@withContext false
+                return false
             }
             if (i >= 3) {
                 alive = true
@@ -347,7 +353,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
             }
         }
         Log.i(TAG, "PicoClaw start: alive=$alive")
-        alive
+        return alive
     }
 
     override suspend fun stop(): Boolean = withContext(Dispatchers.IO) {
@@ -357,7 +363,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         }
         picoClawProcess = null
         // Android-side kill (cross-PRoot-session cleanup)
-        killAndroidProcesses("picoclaw")
+        killAndroidProcesses("picoclaw gateway")
         // Fallback: PRoot 내 잔여 프로세스 정리
         prootManager.exec(
             "/bin/bash", "-c",
@@ -480,6 +486,7 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         private const val TAG = "PicoClawInstaller"
         private const val DOWNLOAD_URL =
             "https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw_Linux_arm64.tar.gz"
+        private val startMutex = Mutex()
         @Volatile
         private var picoClawProcess: Process? = null
     }
