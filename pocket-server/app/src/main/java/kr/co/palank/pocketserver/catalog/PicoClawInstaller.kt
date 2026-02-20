@@ -383,6 +383,50 @@ class PicoClawInstaller(private val context: Context) : ServiceInstaller {
         result.output.trim() == "running"
     }
 
+    /**
+     * PicoClaw 게이트웨이가 실제로 정상 동작하는지 확인.
+     * HTTP 포트 18790 응답 + Telegram Bot API 도달 가능성 체크.
+     */
+    override suspend fun isHealthy(): Boolean = withContext(Dispatchers.IO) {
+        if (!isRunning()) return@withContext false
+
+        // 1) PicoClaw 게이트웨이 HTTP 체크 (port 18790)
+        val httpResult = prootManager.exec(
+            "/bin/bash", "-c",
+            "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 http://127.0.0.1:18790/ 2>/dev/null"
+        )
+        val httpCode = httpResult.output.trim()
+        if (httpCode == "000") {
+            Log.w(TAG, "PicoClaw unhealthy: gateway port 18790 not responding")
+            return@withContext false
+        }
+
+        // 2) Telegram Bot API ping
+        val configFile = File(rootfsPath, "root/.picoclaw/config.json")
+        val botToken = readBotToken(configFile)
+        if (botToken != null) {
+            val tgResult = prootManager.exec(
+                "/bin/bash", "-c",
+                "curl -s --connect-timeout 5 --max-time 10 'https://api.telegram.org/bot$botToken/getMe' 2>/dev/null"
+            )
+            if (!tgResult.output.contains("\"ok\":true")) {
+                Log.w(TAG, "PicoClaw unhealthy: Telegram API unreachable")
+                return@withContext false
+            }
+        }
+
+        true
+    }
+
+    private fun readBotToken(configFile: File): String? {
+        if (!configFile.exists()) return null
+        return try {
+            val json = JSONObject(configFile.readText())
+            val token = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("token", "") ?: ""
+            token.ifEmpty { null }
+        } catch (_: Exception) { null }
+    }
+
     override fun isInstalled(): Boolean {
         return File(rootfsPath, "usr/local/bin/picoclaw").exists()
     }

@@ -42,6 +42,7 @@ class ServerForegroundService : Service() {
     private var browserBridge: BrowserBridge? = null
     private var stateObserverJob: Job? = null
     private var lastAutoStartMs = 0L
+    private var servicesAutoStarted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -108,6 +109,7 @@ class ServerForegroundService : Service() {
 
     private fun observeServerState(manager: SessionManager) {
         stateObserverJob?.cancel()
+        servicesAutoStarted = false
         stateObserverJob = serviceScope.launch {
             manager.state.collect { state ->
                 val (title, content) = when (state) {
@@ -116,11 +118,18 @@ class ServerForegroundService : Service() {
                     is ServerState.Starting -> "서버 시작 중" to "SSH 서버를 준비하고 있습니다"
                     is ServerState.Running -> {
                         // SSH 서버가 올라온 후 설치된 서비스(PicoClaw 등) 자동 시작
-                        autoStartInstalledServices()
+                        // 첫 Running 진입만 실행 — SSH restart 시 서비스 연쇄 재시작 방지
+                        if (!servicesAutoStarted) {
+                            servicesAutoStarted = true
+                            autoStartInstalledServices()
+                        }
                         "서버 실행 중" to "SSH 포트 2022 | 정상 동작"
                     }
                     is ServerState.Stopping -> "서버 중지 중" to "서버를 안전하게 종료하고 있습니다"
-                    is ServerState.Stopped -> "서버 중지됨" to "서버가 중지되었습니다"
+                    is ServerState.Stopped -> {
+                        servicesAutoStarted = false
+                        "서버 중지됨" to "서버가 중지되었습니다"
+                    }
                     is ServerState.Error -> "오류 발생" to state.message
                 }
                 updateNotification(title, content)

@@ -803,37 +803,72 @@ os.networkInterfaces = function() {
     }
 
     /**
-     * Gateway 프로세스가 살아있고, HTTP 엔드포인트가 실제로 응답하는지 확인.
-     * 프로세스만 살아있고 Telegram 등 채널이 죽어있는 "좀비 게이트웨이" 감지.
+     * Gateway 프로세스가 살아있고, HTTP 엔드포인트가 실제로 응답하며,
+     * Telegram Bot API가 도달 가능한지까지 확인.
+     * 프로세스만 살아있고 Telegram 채널이 죽어있는 "좀비 게이트웨이" 감지.
      */
     override suspend fun isHealthy(): Boolean = withContext(Dispatchers.IO) {
         if (!isRunning()) return@withContext false
 
-        // Gateway HTTP 엔드포인트 응답 확인 (127.0.0.1:18789)
-        val result = prootManager.exec(
+        // 1) Gateway HTTP 엔드포인트 응답 확인 (127.0.0.1:18789)
+        val httpResult = prootManager.exec(
             "/bin/bash", "-c",
             "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 http://127.0.0.1:18789/ 2>/dev/null"
         )
-        val httpCode = result.output.trim()
-        val httpOk = httpCode == "200" || httpCode == "302" || httpCode == "401"
-
-        if (!httpOk) {
-            Log.w(TAG, "Gateway unhealthy: process alive but HTTP returned '$httpCode'")
+        val httpCode = httpResult.output.trim()
+        if (httpCode != "200" && httpCode != "302" && httpCode != "401") {
+            Log.w(TAG, "Gateway unhealthy: HTTP returned '$httpCode'")
             return@withContext false
         }
 
-        // 로그에서 최근 활동 확인 — 마지막 로그가 30분 이상 오래되면 비정상
-        val logFile = File(rootfsPath, "tmp/openclaw.log")
-        if (logFile.exists()) {
-            val lastModified = logFile.lastModified()
-            val staleMs = System.currentTimeMillis() - lastModified
-            if (staleMs > 30 * 60 * 1000) {
-                Log.w(TAG, "Gateway unhealthy: log file stale for ${staleMs / 60000}min")
+        // 2) Telegram Bot API ping — Node.js 네트워크 스택과 무관하게 curl로 직접 확인
+        val configFile = File(rootfsPath, "root/.openclaw/openclaw.json")
+        val botToken = readBotToken(configFile)
+        if (botToken != null) {
+            val tgResult = prootManager.exec(
+                "/bin/bash", "-c",
+                "curl -s --connect-timeout 5 --max-time 10 'https://api.telegram.org/bot$botToken/getMe' 2>/dev/null"
+            )
+            if (!tgResult.output.contains("\"ok\":true")) {
+                Log.w(TAG, "Gateway unhealthy: Telegram API unreachable")
                 return@withContext false
             }
         }
 
+        // 3) 로그 staleness (15분 초과 시 비정상)
+        val logFile = File(rootfsPath, "tmp/openclaw.log")
+        if (logFile.exists()) {
+            val staleMs = System.currentTimeMillis() - logFile.lastModified()
+            if (staleMs > 15 * 60 * 1000) {
+                Log.w(TAG, "Gateway unhealthy: log stale ${staleMs / 60000}min")
+                return@withContext false
+            }
+        }
+
+        // 4) 로그에서 연속 Telegram 에러 감지
+        if (logFile.exists()) {
+            try {
+                val recentLines = logFile.readLines().takeLast(30)
+                val telegramErrors = recentLines.count {
+                    it.contains("sendMessage failed") || it.contains("sendChatAction failed")
+                }
+                if (telegramErrors >= 5) {
+                    Log.w(TAG, "Gateway unhealthy: $telegramErrors Telegram errors in last 30 log lines")
+                    return@withContext false
+                }
+            } catch (_: Exception) { /* log read failure is non-fatal */ }
+        }
+
         true
+    }
+
+    private fun readBotToken(configFile: File): String? {
+        if (!configFile.exists()) return null
+        return try {
+            val json = JSONObject(configFile.readText())
+            val token = json.optJSONObject("channels")?.optJSONObject("telegram")?.optString("botToken", "") ?: ""
+            token.ifEmpty { null }
+        } catch (_: Exception) { null }
     }
 
     override fun isInstalled(): Boolean {

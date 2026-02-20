@@ -454,9 +454,13 @@ exit 0
     }
 
     /**
-     * Execute a one-shot command inside PRoot (direct invocation, no execInProot.sh)
+     * Execute a one-shot command inside PRoot (direct invocation, no execInProot.sh).
+     * @param timeoutMs 최대 대기 시간 (밀리초, 기본 2분). 네트워크 행 시 IO 스레드 무한 점유 방지.
      */
-    suspend fun exec(vararg command: String): ExecResult = withContext(Dispatchers.IO) {
+    suspend fun exec(
+        vararg command: String,
+        timeoutMs: Long = 120_000,
+    ): ExecResult = withContext(Dispatchers.IO) {
         ProotBinaryManager.ensureReady(context)
         ensureRootfsDirectories()
 
@@ -468,11 +472,24 @@ exit 0
         pb.redirectErrorStream(true)
 
         val proc = pb.start()
-        val output = proc.inputStream.bufferedReader().readText()
-        val exitCode = proc.waitFor()
+        val output = StringBuilder()
 
-        Log.d(TAG, "exec result (code=$exitCode): ${output.take(500)}")
-        ExecResult(exitCode, output)
+        val readerThread = Thread {
+            try {
+                proc.inputStream.bufferedReader().forEachLine { output.appendLine(it) }
+            } catch (_: Exception) {}
+        }.apply { isDaemon = true; name = "proot-exec-reader"; start() }
+
+        val completed = proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+        if (!completed) {
+            Log.w(TAG, "exec timed out after ${timeoutMs}ms, killing process")
+            proc.destroyForcibly()
+        }
+        readerThread.join(5000)
+
+        val exitCode = if (completed) proc.exitValue() else -1
+        Log.d(TAG, "exec result (code=$exitCode): ${output.toString().take(500)}")
+        ExecResult(exitCode, output.toString())
     }
 
     /**
